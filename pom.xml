@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.gdget.experimental</groupId>
+    <artifactId>contextual-stability</artifactId>
+    <version>0.1-SNAPSHOT</version>
+    <name>${project.artifactId}</name>
+    <description>Optimises graph partitions for a given query workload.</description>
+    <inceptionYear>2014</inceptionYear>
+
+    <licenses>
+        <license>
+            <name>Apache 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>hugofirth</id>
+            <name>Hugo Firth</name>
+            <email>me@hugofirth.com</email>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git@github.com:hugofirth/contextual-stability.git</connection>
+        <url>scm:git:git@github.com:hugofirth/contextual-stability.git</url>
+        <developerConnection>scm:git:git@github.com:hugofirth/contextual-stability.git</developerConnection>
+    </scm>
+
+    <properties>
+        <encoding>UTF-8</encoding>
+        <scala.lang.version>2.11</scala.lang.version>
+        <scala.lang.patch>2</scala.lang.patch>
+        <java.lang.version>1.7</java.lang.version>
+        <akka.version>2.3.6</akka.version>
+    </properties>
+
+    <packaging>jar</packaging>
+
+    <repositories>
+        <repository>
+            <id>scala-tools.org</id>
+            <name>Scala-Tools Maven2 Repository</name>
+            <url>http://scala-tools.org/repo-releases</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+
+        <!-- Scala -->
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>${scala.lang.version}.${scala.lang.patch}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-reflect</artifactId>
+            <version>${scala.lang.version}.${scala.lang.patch}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-compiler</artifactId>
+            <version>${scala.lang.version}.${scala.lang.patch}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.typesafe.akka</groupId>
+            <artifactId>akka-actor_${scala.lang.version}</artifactId>
+            <version>${akka.version}</version>
+        </dependency>
+
+        <!-- Graphs & Maths-->
+
+        <dependency>
+            <groupId>org.scalanlp</groupId>
+            <artifactId>breeze_${scala.lang.version}</artifactId>
+            <version>0.10</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scalanlp</groupId>
+            <artifactId>breeze-natives_${scala.lang.version}</artifactId>
+            <version>0.10</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.tinkerpop.blueprints</groupId>
+            <artifactId>blueprints-core</artifactId>
+            <version>2.6.0</version>
+        </dependency>
+
+        <!-- Logging -->
+
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.0.13</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.typesafe.akka</groupId>
+            <artifactId>akka-slf4j_${scala.lang.version}</artifactId>
+            <version>${akka.version}</version>
+        </dependency>
+
+        <!-- Other -->
+
+        <dependency>
+            <groupId>org.json4s</groupId>
+            <artifactId>json4s-jackson_${scala.lang.version}</artifactId>
+            <version>3.2.10</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.3.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>17.0</version>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <!-- A workaround for http://youtrack.jetbrains.com/issue/SCL-4865 IntelliJ IDEA bug-->
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-actors</artifactId>
+            <version>${scala.lang.version}.${scala.lang.patch}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.8</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scalatest</groupId>
+            <artifactId>scalatest_${scala.lang.version}</artifactId>
+            <version>2.2.1</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-all</artifactId>
+            <version>1.10.8</version>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>net.alchim31.maven</groupId>
+                <artifactId>scala-maven-plugin</artifactId>
+                <version>3.1.6</version>
+                <configuration>
+                    <recompileMode>incremental</recompileMode>
+                    <useZincServer>true</useZincServer>
+                    <ccTestGoals>scalatest:test</ccTestGoals>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>scala-compile-first</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.1</version>
+                <configuration>
+                    <source>${java.lang.version}</source>
+                    <target>${java.lang.version}</target>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.6</version>
+                <configuration>
+                    <includes>
+                        <include>**/*Suite.class</include>
+                        <include>**/*Test.class</include>
+                        <include>**/*Tests.class</include>
+                        <include>**/*Spec.class</include>
+                        <include>**/*Specs.class</include>
+                    </includes>
+                    <useFile>false</useFile>
+                    <disableXmlReport>true</disableXmlReport>
+                    <forkMode>once</forkMode>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+
+</project>
