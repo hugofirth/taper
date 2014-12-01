@@ -32,3 +32,12 @@ sealed case class PartitionException(message: String = null, cause: Throwable = 
   */
 case class PartitionDoesNotExistException(partitionId: Int = null, override val cause: Throwable = null)
   extends PartitionException("The partition with id "+partitionId+" could not be found!", cause)
+
+/**
+  *
+  * @param edgeId
+  * @param partitionId
+  * @param cause
+  */
+case class EdgeDoesNotExistException(edgeId: Long = null, partitionId: Int = null, override val cause: Throwable = null)
+  extends PartitionException("The edge with id "+edgeId+" could not be found in the partition with id "+partitionId+"!")

@@ -24,6 +24,7 @@ import com.tinkerpop.blueprints.{Edge, Graph, Vertex}
 import scala.collection.mutable
 import scala.collection.JavaConverters._
 
+/** */
 object Partition {
   def apply(subGraph: Graph,
             parent: => PartitionedGraph,
@@ -56,14 +57,13 @@ class Partition private (private[this] val subGraph: Graph,
 
   /** Takes a global vertex id - looks it up locally, and then retrieves and returns the associated vertex
     *
-    * @todo prevent local id from leaking in any way.
     *
     * @param id the Long id associated with the desired vertex
     * @return the vertex specified by Long id
     */
   def getVertex(id: Long): Vertex = {
     val vertex = this.subGraph.getVertex(this.vertexIdMap.get(id))
-    if(vertex != null) PartitionVertex(vertex, id) else null
+    if(vertex != null) PartitionVertex(vertex, id, this) else null
   }
 
   /**
@@ -71,56 +71,85 @@ class Partition private (private[this] val subGraph: Graph,
     *
     * @return
     */
-  def getVertices: Iterable[Vertex] = this.subGraph.getVertices.asScala
+  def getVertices: Iterable[Vertex] = this.subGraph.getVertices.asScala.view.map { v =>
+    PartitionVertex(v, v.getProperty[Long]("__globalId"), this)
+  }
 
+  /**
+    *
+    * @param vertex
+    */
   def removeVertex(vertex: Vertex): Unit = {
     val idAsLong = vertex.getId.asInstanceOf[Long]
-    if(this.vertexIdMap.get(idAsLong).isDefined) throw ExceptionFactory.vertexWithIdDoesNotExist(idAsLong)
+    if(this.vertexIdMap.get(idAsLong).isEmpty) throw ExceptionFactory.vertexWithIdDoesNotExist(idAsLong)
     this.vertexIdMap.remove(idAsLong)
     this.subGraph.removeVertex(vertex)
   }
 
   /**
-    * @todo Transform return into a PartitionVertex
     *
     * @param id
     * @return
     */
-  def addVertex(id: Long): Vertex = this.subGraph.addVertex(null)
+  def addVertex(id: Long): Vertex = {
+    if(vertexIdMap.get(id).isDefined) throw ExceptionFactory.vertexWithIdAlreadyExists()
+    val newVertex = this.subGraph.addVertex(null)
+    vertexIdMap.put(id, newVertex.getId.asInstanceOf[Long])
+    PartitionVertex(newVertex, id, this)
+  }
 
   /**
-   * @todo Transform return into a PartitionVertex
-   *
-   * @param vertex
-   * @return
-   */
+    *
+    * @param vertex
+    * @return
+    */
   def addVertex(vertex: Vertex): Vertex = {
     val idAsLong = vertex.getId.asInstanceOf[Long]
     if(vertexIdMap.get(idAsLong).isDefined) throw ExceptionFactory.vertexWithIdAlreadyExists()
     val newVertex = this.subGraph.addVertex(null)
     ElementHelper.copyProperties(vertex, newVertex)
     vertexIdMap.put(idAsLong, newVertex.getId.asInstanceOf[Long])
-    PartitionVertex(newVertex, idAsLong)
+    PartitionVertex(newVertex, idAsLong, this)
   }
 
   /**
-   * @todo Transform return into a PartitionEdge
    *
    * @param id
    * @return
    */
-  def getEdge(id: Long) = subGraph.getEdge(id)
+  def getEdge(id: Long) = {
+    val edge = this.subGraph.getEdge(this.edgeIdMap.get(id))
+    if(edge != null) PartitionEdge(edge, id, this) else null
+  }
 
   /**
-   * @todo Transform return into an Iterable of PartitionEdge
-   *
-   * @return
-   */
-  def getEdges: Iterable[Edge] = this.subGraph.getEdges.asScala
+    *
+    * @return
+    */
+  def getEdges: Iterable[Edge] = this.subGraph.getEdges.asScala.view.map { e =>
+    PartitionEdge(e, e.getProperty[Long]("__globalId"), this)
+  }
 
-  def removeEdge(edge: Edge): Unit = this.subGraph.removeEdge(edge)
+  /**
+    *
+    * @param edge
+    */
+  def removeEdge(edge: Edge): Unit = {
+    val idAsLong = edge.getId.asInstanceOf[Long]
+    if(this.edgeIdMap.get(idAsLong).isEmpty) throw EdgeDoesNotExistException(idAsLong, this.id)
+    this.edgeIdMap.remove(idAsLong)
+    this.subGraph.removeEdge(edge)
+  }
 
-  /** @todo Transform return into a PartitionEdge */
+  /**
+    *
+    * @param id
+    * @param out
+    * @param in
+    * @param label
+    * @param external
+    * @return
+    */
   def addEdge(id: Long, out: Vertex, in: Vertex, label: String, external: Option[(Vertex, Int)] = None): Edge = {
     external match {
       case Some((v,i)) =>
@@ -140,6 +169,8 @@ class Partition private (private[this] val subGraph: Graph,
         this.subGraph.addEdge(id, out, in, label)
     }
   }
+
+  private[partition] def getNextId = parent.getNextElementId
 
   def canEqual(other: Any): Boolean = other.isInstanceOf[Partition]
 

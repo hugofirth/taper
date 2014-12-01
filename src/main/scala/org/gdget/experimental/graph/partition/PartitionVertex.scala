@@ -20,28 +20,45 @@ package org.gdget.experimental.graph.partition
 import java.lang.Iterable
 import java.util
 
+import scala.collection.JavaConverters._
+
 import com.tinkerpop.blueprints.{Edge, VertexQuery, Direction, Vertex}
 
 object PartitionVertex {
-  def apply(toBeWrapped: Vertex, globalId: Long) = new PartitionVertex(toBeWrapped, globalId)
+  def apply(toBeWrapped: Vertex, globalId: Long, parent: Partition) = new PartitionVertex(toBeWrapped, globalId, parent)
 }
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class PartitionVertex private (wrapped: Vertex, globalId: Long) extends Vertex {
+class PartitionVertex private (wrapped: Vertex, globalId: Long, parent: Partition) extends Vertex {
 
 
-  override def getEdges(direction: Direction, strings: String*): Iterable[Edge] =
-    wrapped.getEdges(direction, strings: _*)
 
-  override def addEdge(s: String, other: Vertex): Edge = wrapped.addEdge(s, other)
+  override def getEdges(direction: Direction, labels: String*): Iterable[Edge] = {
+    val edgesView = wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>
+      PartitionEdge(e, e.getProperty[Long]("__globalId"), parent).asInstanceOf[Edge]
+    }
+    edgesView.asJava
+  }
+
+
+  override def addEdge(label: String, other: Vertex): Edge = {
+    val newEdge = wrapped.addEdge(label, other)
+    val globalId = parent.getNextId
+    newEdge.setProperty("__globalId", globalId)
+    PartitionEdge(newEdge, globalId, parent)
+  }
 
   override def query(): VertexQuery = wrapped.query()
 
-  override def getVertices(direction: Direction, strings: String*): Iterable[Vertex] =
-    wrapped.getVertices(direction, strings: _*)
+  override def getVertices(direction: Direction, labels: String*): Iterable[Vertex] = {
+    val verticesView =  wrapped.getVertices(direction, labels: _*).asScala.view.map { v =>
+      PartitionVertex(v, v.getProperty[Long]("__globalId"), parent).asInstanceOf[Vertex]
+    }
+    verticesView.asJava
+  }
 
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)
 

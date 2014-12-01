@@ -18,8 +18,9 @@
   */
 package org.gdget.experimental.graph.partition
 
+import java.util.concurrent.atomic.AtomicLong
+
 import com.tinkerpop.blueprints._
-import com.tinkerpop.blueprints.impls.tg.TinkerGraph
 import com.tinkerpop.blueprints.util.{DefaultGraphQuery, ExceptionFactory}
 
 import scala.collection.mutable
@@ -41,6 +42,12 @@ sealed trait PartitionedGraph extends Graph {
     * @return the `Option` object representing the partition with id partitionId, or `None`
     */
   def getPartitionById(partitionId: Int): Option[Partition]
+
+  /** Returns the next Long id for an element in the graph. Should be atomic or rely on some consensus.
+    *
+    * @return a `Long` to act as an [[com.tinkerpop.blueprints.Element]] object id
+    */
+  private[partition] def getNextElementId: Long
 }
 
 /** Factory for [[org.gdget.experimental.graph.partition.PartitionedGraph]] instances. */
@@ -51,18 +58,17 @@ object PartitionedGraph {
     *
     * @todo Use generic graph and allow passing of ENUM to specify graph implementation.
     *
-    * @param graphLocation a `String` filesystem location for the original graph
+    * @param graph the original graph
     * @param strategy [[org.gdget.experimental.graph.partition.PartitionStrategy]] object defining the method of
     *                subdividing the graph
     * @param numPartitions an `Int` number of partitions to be created
     * @param distributed a `Boolean` which represents whether the graph will be distributed across machines
     * @return The created PartitionedGraph object
     */
-  def apply(graphLocation: String, strategy: PartitionStrategy, numPartitions: Int, distributed: Boolean = false) = {
+  def apply(graph: Graph, strategy: PartitionStrategy, numPartitions: Int, distributed: Boolean = false) = {
     if(distributed) {
       ???
     } else {
-      val graph: Graph = new TinkerGraph(graphLocation)
       //Get the list of subgraphs and create partitions out of them
       var partitions: Map[Int, Partition] = Map()
       val partitionedGraph = new LocalPartitionedGraph(graph, partitions)
@@ -89,10 +95,12 @@ object PartitionedGraph {
   */
 class LocalPartitionedGraph private (graph: Graph,
                                      partitionMap: => Map[Int, Partition],
-                                     edgeMap: mutable.MultiMap[AnyRef, Int]) extends PartitionedGraph {
+                                     edgeMap: mutable.MultiMap[AnyRef, Int],
+                                     initialId: Int = 0) extends PartitionedGraph {
 
   private lazy val partitions = partitionMap
   private val features = graph.getFeatures
+  private val counter = new AtomicLong(initialId)
 
   override def getPartitions: Iterable[Partition] = partitions.values
 
@@ -184,4 +192,6 @@ class LocalPartitionedGraph private (graph: Graph,
   }
 
   override def getVertices(s: String, o: scala.Any): Iterable[Vertex] = ???
+
+  override def getNextElementId = counter.incrementAndGet()
 }

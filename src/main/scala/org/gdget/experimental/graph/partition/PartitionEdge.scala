@@ -29,7 +29,10 @@ object PartitionEdge {
   */
 class PartitionEdge private(wrapped: Edge, globalId: Long, parent: Partition) extends Edge {
 
-  override def getVertex(direction: Direction): Vertex = wrapped.getVertex(direction)
+  override def getVertex(direction: Direction): Vertex = {
+    val v = wrapped.getVertex(direction)
+    PartitionVertex(v, v.getProperty[Long]("__globalId"), parent)
+  }
 
   override def getLabel: String = wrapped.getLabel
 

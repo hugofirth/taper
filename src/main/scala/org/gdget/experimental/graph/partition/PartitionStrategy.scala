@@ -17,6 +17,7 @@
   */
 package org.gdget.experimental.graph.partition
 
+import com.tinkerpop.blueprints.impls.neo4j2.Neo4j2Graph
 import com.tinkerpop.blueprints.impls.tg.TinkerGraph
 import com.tinkerpop.blueprints.util.ElementHelper
 import com.tinkerpop.blueprints.{Direction, Graph, Vertex}
@@ -30,6 +31,12 @@ import scala.collection.mutable
   */
 trait PartitionStrategy {
   def execute(graph: Graph, numPartitions: Int): List[(Graph, mutable.Map[Long, Long], mutable.Map[Long, Long])]
+  def createEmptySubGraph(graph: Graph): Graph = graph match {
+    case graph: TinkerGraph => ???
+    case graph: Neo4j2Graph => ???
+    case _ => ??? //Throw unsupported implementation exception or something
+  }
+
 }
 
 /** The PartitionStrategy object for creating a simple, "Hash-based", graph partition.
@@ -42,6 +49,7 @@ case object HashPartition extends PartitionStrategy {
     *
     * @todo Adapt the partition to periodically persist the partitions to free up memory.
     * @todo Generalise graph implementation choice - perhaps with dependency injection or a factory?
+    * @todo Make and return partitions from here, keep counter of elements created and pass that onto PartitionedGraph
     *
     * @param graph The parent graph to be sub divided.
     * @param numPartitions The number of sub graphs to create
