@@ -20,6 +20,7 @@ package org.gdget.experimental.graph.partition
 
 import com.tinkerpop.blueprints.util.{ExceptionFactory, ElementHelper}
 import com.tinkerpop.blueprints.{Edge, Graph, Vertex}
+import org.gdget.util.Identifier
 
 import scala.collection.mutable
 import scala.collection.JavaConverters._
@@ -28,8 +29,8 @@ import scala.collection.JavaConverters._
 object Partition {
   def apply(subGraph: Graph,
             parent: => PartitionedGraph,
-            vertexIdMap: mutable.Map[Long, Long],
-            edgeIdMap: mutable.Map[Long, Long],
+            vertexIdMap: mutable.Map[Identifier, Identifier],
+            edgeIdMap: mutable.Map[Identifier, Identifier],
             id: Int): Partition = {
     new Partition(subGraph, parent, vertexIdMap, edgeIdMap, id)
   }
@@ -41,8 +42,8 @@ object Partition {
   */
 class Partition private (private[this] val subGraph: Graph,
                          parentGraph: => PartitionedGraph,
-                         private[partition] val vertexIdMap: mutable.Map[Long, Long],
-                         private[partition] val edgeIdMap: mutable.Map[Long, Long],
+                         private[partition] val vertexIdMap: mutable.Map[Identifier, Identifier],
+                         private[partition] val edgeIdMap: mutable.Map[Identifier, Identifier],
                          val id: Int) {
 
   lazy private[partition] val parent = parentGraph
@@ -72,7 +73,7 @@ class Partition private (private[this] val subGraph: Graph,
     * @return
     */
   def getVertices: Iterable[Vertex] = this.subGraph.getVertices.asScala.view.map { v =>
-    PartitionVertex(v, v.getProperty[Long]("__globalId"), this)
+    PartitionVertex(v, v.getProperty[Identifier]("__globalId"), this)
   }
 
   /**
@@ -80,9 +81,8 @@ class Partition private (private[this] val subGraph: Graph,
     * @param vertex
     */
   def removeVertex(vertex: Vertex): Unit = {
-    val idAsLong = vertex.getId.asInstanceOf[Long]
-    if(this.vertexIdMap.get(idAsLong).isEmpty) throw ExceptionFactory.vertexWithIdDoesNotExist(idAsLong)
-    this.vertexIdMap.remove(idAsLong)
+    if(this.vertexIdMap.get(vertex.getId).isEmpty) throw ExceptionFactory.vertexWithIdDoesNotExist(vertex.getId)
+    this.vertexIdMap.remove(vertex.getId)
     this.subGraph.removeVertex(vertex)
   }
 
@@ -94,7 +94,7 @@ class Partition private (private[this] val subGraph: Graph,
   def addVertex(id: Long): Vertex = {
     if(vertexIdMap.get(id).isDefined) throw ExceptionFactory.vertexWithIdAlreadyExists()
     val newVertex = this.subGraph.addVertex(null)
-    vertexIdMap.put(id, newVertex.getId.asInstanceOf[Long])
+    vertexIdMap.put(id, newVertex.getId)
     PartitionVertex(newVertex, id, this)
   }
 
@@ -104,12 +104,11 @@ class Partition private (private[this] val subGraph: Graph,
     * @return
     */
   def addVertex(vertex: Vertex): Vertex = {
-    val idAsLong = vertex.getId.asInstanceOf[Long]
-    if(vertexIdMap.get(idAsLong).isDefined) throw ExceptionFactory.vertexWithIdAlreadyExists()
+    if(vertexIdMap.get(vertex.getId).isDefined) throw ExceptionFactory.vertexWithIdAlreadyExists()
     val newVertex = this.subGraph.addVertex(null)
     ElementHelper.copyProperties(vertex, newVertex)
-    vertexIdMap.put(idAsLong, newVertex.getId.asInstanceOf[Long])
-    PartitionVertex(newVertex, idAsLong, this)
+    vertexIdMap.put(vertex.getId, newVertex.getId)
+    PartitionVertex(newVertex, vertex.getId, this)
   }
 
   /**
@@ -127,7 +126,7 @@ class Partition private (private[this] val subGraph: Graph,
     * @return
     */
   def getEdges: Iterable[Edge] = this.subGraph.getEdges.asScala.view.map { e =>
-    PartitionEdge(e, e.getProperty[Long]("__globalId"), this)
+    PartitionEdge(e, e.getProperty[Identifier]("__globalId"), this)
   }
 
   /**
@@ -135,9 +134,8 @@ class Partition private (private[this] val subGraph: Graph,
     * @param edge
     */
   def removeEdge(edge: Edge): Unit = {
-    val idAsLong = edge.getId.asInstanceOf[Long]
-    if(this.edgeIdMap.get(idAsLong).isEmpty) throw EdgeDoesNotExistException(idAsLong, this.id)
-    this.edgeIdMap.remove(idAsLong)
+    if(this.edgeIdMap.get(edge.getId).isEmpty) throw EdgeDoesNotExistException(Some(edge.getId), Some(this.id))
+    this.edgeIdMap.remove(edge.getId)
     this.subGraph.removeEdge(edge)
   }
 

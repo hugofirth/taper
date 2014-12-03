@@ -20,7 +20,8 @@ package org.gdget.experimental.graph.partition
 import com.tinkerpop.blueprints.impls.neo4j2.Neo4j2Graph
 import com.tinkerpop.blueprints.impls.tg.TinkerGraph
 import com.tinkerpop.blueprints.util.ElementHelper
-import com.tinkerpop.blueprints.{Direction, Graph, Vertex}
+import com.tinkerpop.blueprints.{Direction, Graph}
+import org.gdget.util.Identifier
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -30,9 +31,11 @@ import scala.collection.mutable
   * @author hugofirth
   */
 trait PartitionStrategy {
-  def execute(graph: Graph, numPartitions: Int): List[(Graph, mutable.Map[Long, Long], mutable.Map[Long, Long])]
+  def execute(graph: Graph,
+              numPartitions: Int,
+              parent: PartitionedGraph): (Map[Int, Partition], mutable.MultiMap[Identifier, Int], Long)
   def createEmptySubGraph(graph: Graph): Graph = graph match {
-    case graph: TinkerGraph => ???
+    case graph: TinkerGraph => new TinkerGraph()
     case graph: Neo4j2Graph => ???
     case _ => ??? //Throw unsupported implementation exception or something
   }
@@ -43,7 +46,7 @@ trait PartitionStrategy {
   *
   * @author hugofirth
   */
-case object HashPartition extends PartitionStrategy {
+object HashPartition extends PartitionStrategy {
 
   /** Simplistic early implementation of Hash partitioning algorithm. Relies upon all sub graphs fitting into memory.
     *
@@ -55,31 +58,43 @@ case object HashPartition extends PartitionStrategy {
     * @param numPartitions The number of sub graphs to create
     * @return The set of created sub graphs along with associated vertex/edge  global -> local Id maps
     */
-  override def execute(graph: Graph, numPartitions: Int): List[(Graph, mutable.Map[Long, Long], mutable.Map[Long, Long])] = {
-    val partitionComponents: List[(Graph, mutable.Map[Long, Long], mutable.Map[Long, Long])] =
-      (for (i <- 0 to numPartitions) yield {
-        ( new TinkerGraph(), mutable.Map[Long, Long](), mutable.Map[Long, Long]() )
-      }).toList
-    val vertices: Iterable[Vertex] = graph.getVertices.asScala
-    val assignedVertices: Iterable[(Vertex, Int)] = vertices.zip(Stream.continually((0 until numPartitions).toStream).flatten)
-    val edgesSeen = new mutable.HashMap[AnyRef, mutable.Set[Int]] with mutable.MultiMap[AnyRef, Int]
+  override def execute(graph: Graph,
+                       numPartitions: Int,
+                       parent: PartitionedGraph): (Map[Int, Partition], mutable.MultiMap[Identifier, Int], Long) = {
 
-    assignedVertices.foreach {
-      case (v:Vertex, i:Int) =>
-        val newVertex = partitionComponents(i)._1.addVertex(v.getId)
-        partitionComponents(i)._2(v.getId.asInstanceOf[Long]) = newVertex.getId.asInstanceOf[Long]
-        ElementHelper.copyProperties(v,newVertex)
-        v.getEdges(Direction.BOTH).asScala.foreach(e => {
-          if(!edgesSeen.entryExists(e.getId, _ == i)) {
-            //If Edge doesn't already exist locally then do
-            val newEdge = partitionComponents(i)._1.addEdge(e.getId, e.getVertex(Direction.OUT), e.getVertex(Direction.IN), e.getLabel)
-            partitionComponents(i)._3(e.getId.asInstanceOf[Long]) = newEdge.getId.asInstanceOf[Long]
-            ElementHelper.copyProperties(e, newEdge)
-            edgesSeen.addBinding(e.getId, i)
-          }
-        })
+    val subGraphs = for(i <- 0 until numPartitions ) yield createEmptySubGraph(graph)
+    val vertexIdMaps = for(i <- 0 until numPartitions) yield mutable.Map[Identifier, Identifier]()
+    val edgeIdMaps = for(i <- 0 until numPartitions) yield mutable.Map[Identifier, Identifier]()
+
+    val vertices = graph.getVertices.asScala
+    val partitionKeys = Iterator.continually((0 until numPartitions).toIterator).flatten
+    val edgesSeen = new mutable.HashMap[Identifier, mutable.Set[Int]] with mutable.MultiMap[Identifier, Int]
+    var maxId: Identifier = 0L
+
+    vertices.foreach { v =>
+      val key = partitionKeys.next()
+      val newVertex = subGraphs(key).addVertex(null)
+
+      maxId = if(maxId < v.getId) v.getId else maxId
+      vertexIdMaps(key)(v.getId) = newVertex.getId
+      ElementHelper.copyProperties(v, newVertex)
+      newVertex.setProperty("__globalId", v.getId)
+      v.getEdges(Direction.BOTH).asScala.foreach { e =>
+        if(!edgesSeen.entryExists(e.getId, _ == key)) {
+          //If Edge doesn't already exist locally then do
+          val newEdge = subGraphs(key).addEdge(null, e.getVertex(Direction.OUT), e.getVertex(Direction.IN), e.getLabel)
+          maxId = if(maxId < e.getId) e.getId else maxId
+          edgeIdMaps(key)(e.getId) = newEdge.getId
+          ElementHelper.copyProperties(e, newEdge)
+          edgesSeen.addBinding(e.getId, key)
+        }
+      }
     }
-    partitionComponents
+
+    val partitions = for(i <- 0 until numPartitions) yield {
+      (i, Partition(subGraphs(i), parent, vertexIdMaps(i), edgeIdMaps(i), i))
+    }
+    (partitions.toMap, edgesSeen, maxId)
   }
 }
 
@@ -88,6 +103,8 @@ case object HashPartition extends PartitionStrategy {
   *
   * @author hugofirth
   */
-case object SpectralPartition extends PartitionStrategy {
-  override def execute(graph: Graph, numPartitions: Int): List[(Graph, mutable.Map[Long, Long], mutable.Map[Long, Long])] = ???
+object SpectralPartition extends PartitionStrategy {
+  override def execute(graph: Graph,
+                       numPartitions: Int,
+                       parent: PartitionedGraph): (Map[Int, Partition], mutable.MultiMap[Identifier, Int], Long) = ???
 }

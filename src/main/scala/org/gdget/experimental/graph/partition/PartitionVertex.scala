@@ -20,25 +20,28 @@ package org.gdget.experimental.graph.partition
 import java.lang.Iterable
 import java.util
 
+import org.gdget.util.Identifier
+
 import scala.collection.JavaConverters._
 
 import com.tinkerpop.blueprints.{Edge, VertexQuery, Direction, Vertex}
 
 object PartitionVertex {
-  def apply(toBeWrapped: Vertex, globalId: Long, parent: Partition) = new PartitionVertex(toBeWrapped, globalId, parent)
+  def apply(toBeWrapped: Vertex, globalId: Identifier, parent: Partition) = new PartitionVertex(toBeWrapped, globalId, parent)
 }
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class PartitionVertex private (wrapped: Vertex, globalId: Long, parent: Partition) extends Vertex {
+class PartitionVertex private (wrapped: Vertex, globalId: Identifier, parent: Partition) extends Vertex {
 
-
+  //Set globalId property to provided value - convert to Long because some Graph vendors limit property types
+  wrapped.setProperty("__globalId", globalId.toLong)
 
   override def getEdges(direction: Direction, labels: String*): Iterable[Edge] = {
     val edgesView = wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>
-      PartitionEdge(e, e.getProperty[Long]("__globalId"), parent).asInstanceOf[Edge]
+      PartitionEdge(e, e.getProperty[Identifier]("__globalId"), parent).asInstanceOf[Edge]
     }
     edgesView.asJava
   }
@@ -55,14 +58,14 @@ class PartitionVertex private (wrapped: Vertex, globalId: Long, parent: Partitio
 
   override def getVertices(direction: Direction, labels: String*): Iterable[Vertex] = {
     val verticesView =  wrapped.getVertices(direction, labels: _*).asScala.view.map { v =>
-      PartitionVertex(v, v.getProperty[Long]("__globalId"), parent).asInstanceOf[Vertex]
+      PartitionVertex(v, v.getProperty[Identifier]("__globalId"), parent).asInstanceOf[Vertex]
     }
     verticesView.asJava
   }
 
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)
 
-  override def getId: AnyRef = globalId
+  override def getId: java.lang.Long = wrapped.getProperty[Identifier]("__globalId")
 
   override def setProperty(propertyKey: String, propertyValue: scala.Any): Unit =
     wrapped.setProperty(propertyKey, propertyValue)

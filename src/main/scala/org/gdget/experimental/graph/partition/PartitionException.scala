@@ -18,20 +18,22 @@
   */
 package org.gdget.experimental.graph.partition
 
-/**
-  * Description of Class
-  *
-  * @author hugofirth
-  */
-sealed case class PartitionException(message: String = null, cause: Throwable = null) extends RuntimeException(message, cause)
+import org.gdget.util.Identifier
+
+/** Marker trait for exceptions thrown from the [[org.gdget.experimental.graph.partition]] package. */
+sealed trait PartitionException extends RuntimeException
+object PartitionException {
+  def unapply(e: PartitionException): Option[(String, Throwable)] = Some(e.getMessage -> e.getCause)
+}
 
 /**
-  * Description of Class
   *
-  * @author hugofirth
+  * @param partitionId
+  * @param cause
   */
-case class PartitionDoesNotExistException(partitionId: Int = null, override val cause: Throwable = null)
-  extends PartitionException("The partition with id "+partitionId+" could not be found!", cause)
+case class PartitionDoesNotExistException(partitionId: Option[Int] = None, cause: Option[Throwable] = None)
+  extends RuntimeException("The partition with id "+partitionId.getOrElse("N/A")+" could not be found!", cause.orNull)
+  with PartitionException
 
 /**
   *
@@ -39,5 +41,8 @@ case class PartitionDoesNotExistException(partitionId: Int = null, override val 
   * @param partitionId
   * @param cause
   */
-case class EdgeDoesNotExistException(edgeId: Long = null, partitionId: Int = null, override val cause: Throwable = null)
-  extends PartitionException("The edge with id "+edgeId+" could not be found in the partition with id "+partitionId+"!")
+case class EdgeDoesNotExistException(edgeId: Option[Identifier] = None,
+                                     partitionId: Option[Int] = None,
+                                     cause: Option[Throwable] = None)
+  extends RuntimeException("The edge with id "+edgeId.getOrElse("N/A")+" could not be found in the partition with" +
+    " id "+partitionId.getOrElse("N/A")+"!", cause.orNull) with PartitionException

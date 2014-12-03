@@ -18,27 +18,31 @@
 package org.gdget.experimental.graph.partition
 
 import com.tinkerpop.blueprints.{Vertex, Direction, Edge}
+import org.gdget.util.Identifier
 
 object PartitionEdge {
-  def apply(toBeWrapped: Edge, globalId: Long, parent: Partition) = new PartitionEdge(toBeWrapped, globalId, parent)
+  def apply(toBeWrapped: Edge, globalId: Identifier, parent: Partition) = new PartitionEdge(toBeWrapped, globalId, parent)
 }
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class PartitionEdge private(wrapped: Edge, globalId: Long, parent: Partition) extends Edge {
+class PartitionEdge private(wrapped: Edge, globalId: Identifier, parent: Partition) extends Edge {
+
+  //Set globalId property to provided value - convert to Long because some Graph vendors limit property types
+  wrapped.setProperty("__globalId", globalId.toLong)
 
   override def getVertex(direction: Direction): Vertex = {
     val v = wrapped.getVertex(direction)
-    PartitionVertex(v, v.getProperty[Long]("__globalId"), parent)
+    PartitionVertex(v, v.getProperty[Identifier]("__globalId"), parent)
   }
 
   override def getLabel: String = wrapped.getLabel
 
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)
 
-  override def getId: AnyRef = globalId
+  override def getId: java.lang.Long = wrapped.getProperty[Identifier]("__globalId")
 
   override def setProperty(propertyKey: String, propertyValue: scala.Any): Unit =
     wrapped.setProperty(propertyKey, propertyValue)

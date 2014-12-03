@@ -22,8 +22,10 @@ import java.util.concurrent.atomic.AtomicLong
 
 import com.tinkerpop.blueprints._
 import com.tinkerpop.blueprints.util.{DefaultGraphQuery, ExceptionFactory}
+import org.gdget.util.Identifier
 
 import scala.collection.mutable
+import scala.collection.JavaConverters._
 
 
 sealed trait PartitionedGraph extends Graph {
@@ -71,14 +73,15 @@ object PartitionedGraph {
     } else {
       //Get the list of subgraphs and create partitions out of them
       var partitions: Map[Int, Partition] = Map()
-      val partitionedGraph = new LocalPartitionedGraph(graph, partitions)
-      val partitionsList = strategy.execute(graph, numPartitions).zipWithIndex.map { case (components, i) =>
-          val partition = Partition(subGraph = components._1, parent = partitionedGraph, vertexIdMap = components._2,
-            edgeIdMap = components._3, id = i)
-          (i, partition)
-      }
+      var edgePartitions: mutable.MultiMap[Identifier, Int] = new mutable.HashMap[Identifier, mutable.Set[Int]]
+        with mutable.MultiMap[Identifier, Int]
+      var initialId = 0L
+      val partitionedGraph = new LocalPartitionedGraph(graph, partitions, edgePartitions, initialId)
+      val partitionComponents = strategy.execute(graph, numPartitions, partitionedGraph)
       //Add Partitions to a map Int => Partition
-      partitions = partitionsList.toMap
+      partitions = partitionComponents._1
+      edgePartitions = partitionComponents._2
+      initialId = partitionComponents._3
       //Return PartitionedGraph
       partitionedGraph
     }
@@ -90,17 +93,18 @@ object PartitionedGraph {
   * @constructor creates a new locally partitioned graph from a base graph, a map of partitions and a map of edges
   * @param graph the base graph
   * @param partitionMap a map of partitions to their integer identifiers
-  * @param edgeMap a map of global edge identifiers to the set of partition identifiers representing where they may be found
+  * @param edgePartitions a map of global edge identifiers to the set of partition identifiers representing where they may be found
   * @author hugofirth
   */
-class LocalPartitionedGraph private (graph: Graph,
+class LocalPartitionedGraph private[partition] (graph: Graph,
                                      partitionMap: => Map[Int, Partition],
-                                     edgeMap: mutable.MultiMap[AnyRef, Int],
-                                     initialId: Int = 0) extends PartitionedGraph {
+                                     edgePartitions: => mutable.MultiMap[Identifier, Int],
+                                     initialId: => Long = 0) extends PartitionedGraph {
 
   private lazy val partitions = partitionMap
+  private lazy val edgeMap = edgePartitions
   private val features = graph.getFeatures
-  private val counter = new AtomicLong(initialId)
+  private lazy val counter = new AtomicLong(initialId)
 
   override def getPartitions: Iterable[Partition] = partitions.values
 
@@ -109,7 +113,7 @@ class LocalPartitionedGraph private (graph: Graph,
   private def getEdgeFromPartition(partitionId: Int, edgeId: Long): Edge = {
     getPartitionById(partitionId) match {
       case Some(p) => p.getEdge(edgeId)
-      case None => throw PartitionDoesNotExistException(partitionId)
+      case None => throw PartitionDoesNotExistException(Some(partitionId))
     }
   }
 
@@ -120,7 +124,7 @@ class LocalPartitionedGraph private (graph: Graph,
     val idAsLong: Long = id.asInstanceOf[Long]
     edgeMap.get(idAsLong) match {
       case Some(p: Set[Int]) => getEdgeFromPartition(p.head, idAsLong)
-      case None => null //If edge not in map, return null as per reference implementation
+      case _ => null //If edge not in map, return null as per reference implementation
     }
   }
 
@@ -163,13 +167,13 @@ class LocalPartitionedGraph private (graph: Graph,
 
   override def addVertex(id: scala.Any): Vertex = this.partitions.values.head.addVertex(id.asInstanceOf[Long])
 
-  override def getEdges: Iterable[Edge] = {
+  override def getEdges: java.lang.Iterable[Edge] = {
     //NOTE: May contain duplicates
     val edgeIterables: Iterable[Iterable[Edge]] = this.partitions.values.map(p => p.getEdges)
-    edgeIterables.foldLeft(Iterable.empty[Edge])( (accum, e) => accum ++ e )
+    edgeIterables.foldLeft(Iterable.empty[Edge])( (accum, e) => accum ++ e ).asJava
   }
 
-  override def getEdges(s: String, o: scala.Any): Iterable[Edge] = ???
+  override def getEdges(s: String, o: scala.Any): java.lang.Iterable[Edge] = ???
 
   override def removeEdge(edge: Edge): Unit = {
     val idAsLong: Long = edge.getId.asInstanceOf[Long]
@@ -178,7 +182,7 @@ class LocalPartitionedGraph private (graph: Graph,
       edgePartitionIndices.get.foreach { i =>
         getPartitionById(i) match {
           case Some(p) => p.removeEdge(edge)
-          case None => throw PartitionDoesNotExistException(i)
+          case None => throw PartitionDoesNotExistException(Some(i))
         }
       }
     }
@@ -186,12 +190,12 @@ class LocalPartitionedGraph private (graph: Graph,
 
   override def query(): GraphQuery = new DefaultGraphQuery(this)
 
-  override def getVertices: Iterable[Vertex] = {
+  override def getVertices: java.lang.Iterable[Vertex] = {
     val vertexIterables: Iterable[Iterable[Vertex]] = partitions.values.map(p => p.getVertices)
-    vertexIterables.foldLeft(Iterable.empty[Vertex])( (accum, v) => accum ++ v )
+    vertexIterables.foldLeft(Iterable.empty[Vertex])( (accum, v) => accum ++ v ).asJava
   }
 
-  override def getVertices(s: String, o: scala.Any): Iterable[Vertex] = ???
+  override def getVertices(s: String, o: scala.Any): java.lang.Iterable[Vertex] = ???
 
   override def getNextElementId = counter.incrementAndGet()
 }
