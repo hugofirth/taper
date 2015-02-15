@@ -17,62 +17,120 @@
   */
 package org.gdget.experimental.graph.partition
 
-import java.lang.Iterable
-import java.util
+import java.lang.{Iterable => JIterable}
+import java.util.{Set => JSet}
 
-import org.gdget.util.Identifier
+import com.tinkerpop.blueprints.util.DefaultVertexQuery
+import org.gdget.util.{Counting, Identifier}
 
 import scala.collection.JavaConverters._
 
-import com.tinkerpop.blueprints.{Edge, VertexQuery, Direction, Vertex}
+import com.tinkerpop.blueprints._
+
+sealed trait Internal extends PartitionVertex {}
+
+sealed trait External extends PartitionVertex {
+
+  override def getEdges(direction: Direction, labels: String*): JIterable[Edge] = {
+    this.logTraversal()
+    this.partition.parent.getVertex(this.getId).getEdges(direction, labels: _*)
+  }
+
+  override def query(): VertexQuery = {
+    this.logTraversal()
+    this.partition.parent.getVertex(this.getId).query()
+  }
+
+  override def getVertices(direction: Direction, labels: String*): JIterable[Vertex] = {
+    this.logTraversal()
+    this.partition.parent.getVertex(this.getId).getVertices(direction, labels: _*)
+  }
+
+  def logTraversal() = this.partition.parent match {
+    case graph : Counting => graph.count()
+    case _ =>
+  }
+}
 
 object PartitionVertex {
-  def apply(toBeWrapped: Vertex, globalId: Identifier, parent: Partition) = new PartitionVertex(toBeWrapped, globalId, parent)
+  def apply(toBeWrapped: Vertex, globalId: Identifier, partition: Partition) = toBeWrapped match {
+    case v: PartitionVertex => v
+    case v if v.getProperty[Int]("__external") != null => new PartitionVertex(toBeWrapped, globalId, partition) with External
+    case v => new PartitionVertex(toBeWrapped, globalId, partition) with Internal
+  }
+  def unapply(v: PartitionVertex): Option[Vertex] = Some(v.wrapped)
+  def unwrap(v: Vertex): Vertex = v match {
+    case PartitionVertex(vertex) => vertex
+    case _ => v
+  }
 }
+
+
+
 
 /** Description of Class
   *
+  *
   * @author hugofirth
   */
-class PartitionVertex private (wrapped: Vertex, globalId: Identifier, parent: Partition) extends Vertex {
+class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val partition: Partition) extends Vertex {
 
   //Set globalId property to provided value - convert to Long because some Graph vendors limit property types
   wrapped.setProperty("__globalId", globalId.toLong)
 
-  override def getEdges(direction: Direction, labels: String*): Iterable[Edge] = {
-    val edgesView = wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>
-      PartitionEdge(e, e.getProperty[Identifier]("__globalId"), parent).asInstanceOf[Edge]
+  override def getEdges(direction: Direction, labels: String*): JIterable[Edge] = {
+    val edgesView: Iterable[Edge]= wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>
+      PartitionEdge(e, e.getProperty[Any]("__globalId"), partition)
     }
     edgesView.asJava
   }
 
-
-  override def addEdge(label: String, other: Vertex): Edge = {
-    val newEdge = wrapped.addEdge(label, other)
-    val globalId = parent.getNextId
-    newEdge.setProperty("__globalId", globalId)
-    PartitionEdge(newEdge, globalId, parent)
+  private[partition] def getPartitionEdges(direction: Direction, labels: String*): Iterable[PartitionEdge] = {
+    getEdges(direction, labels:_*).asScala.view.map( _.asInstanceOf[PartitionEdge] )
   }
 
-  override def query(): VertexQuery = wrapped.query()
+  override def addEdge(label: String, other: Vertex): PartitionEdge = {
+    val newEdge = wrapped.addEdge(label, other)
+    val globalId = partition.getNextId
+    newEdge.setProperty("__globalId", globalId)
+    PartitionEdge(newEdge, globalId, partition)
+  }
 
-  override def getVertices(direction: Direction, labels: String*): Iterable[Vertex] = {
-    val verticesView =  wrapped.getVertices(direction, labels: _*).asScala.view.map { v =>
-      PartitionVertex(v, v.getProperty[Identifier]("__globalId"), parent).asInstanceOf[Vertex]
+  override def query(): VertexQuery = new DefaultVertexQuery(this)
+
+  override def getVertices(direction: Direction, labels: String*): JIterable[Vertex] = {
+    val verticesView: Iterable[Vertex] =  wrapped.getVertices(direction, labels: _*).asScala.view.map { v =>
+      PartitionVertex(v, v.getProperty[Any]("__globalId"), partition)
     }
     verticesView.asJava
   }
 
+  private[partition] def getPartitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] = {
+    getVertices(direction, labels:_*).asScala.view.map( _.asInstanceOf[PartitionVertex] )
+  }
+
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)
 
-  override def getId: java.lang.Long = wrapped.getProperty[Identifier]("__globalId")
+  override def getId: Identifier = wrapped.getProperty[Any]("__globalId")
 
   override def setProperty(propertyKey: String, propertyValue: scala.Any): Unit =
     wrapped.setProperty(propertyKey, propertyValue)
 
-  override def getPropertyKeys: util.Set[String] = wrapped.getPropertyKeys
+  override def getPropertyKeys: JSet[String] = wrapped.getPropertyKeys
+
 
   override def remove(): Unit = wrapped.remove()
 
   override def removeProperty[T](propertyKey: String): T = wrapped.removeProperty[T](propertyKey)
+
+  override def equals(other: Any): Boolean = other match {
+    case that: Vertex =>
+      other.isInstanceOf[Vertex] &&
+        this.getId == Identifier(that.getId)
+    case _ => false
+  }
+
+  override def hashCode(): Int = this.getId.hashCode()
+
+  override def toString: String = "v[g:"+this.getId+",l:"+this.wrapped.getId+"]"
 }

@@ -25,7 +25,7 @@ import org.gdget.experimental.graph.UnsupportedIdFormatException
   */
 class Identifier private (val id: Long) extends Ordered[Identifier] {
 
-  override def toString: String = "id:"+id.toString
+  override def toString: String = id.toString
 
   def canEqual(other: Any): Boolean = other.isInstanceOf[Identifier]
 
@@ -36,24 +36,27 @@ class Identifier private (val id: Long) extends Ordered[Identifier] {
     case _ => false
   }
 
-  override def hashCode(): Int = {
-    val state = Seq(id)
-    state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
-  }
+  override def hashCode(): Int = this.id.hashCode()
 
   override def compare(that: Identifier): Int = this.id compare that.id
 }
 
 object Identifier {
-  implicit def string2Id(s: String): Identifier = new Identifier(s.toLong)
-  implicit def id2String(id: Identifier): String = id.id.toString
+  def apply(o: Any): Identifier = any2Id(o)
+  implicit def int2Id(i: Int): Identifier = new Identifier(i)
   implicit def long2Id(l: Long): Identifier = new Identifier(l)
   implicit def id2Long(id: Identifier): Long = id.id
+  implicit def javaString2Id(s: java.lang.String): Identifier = new Identifier(java.lang.Long.parseLong(s))
   implicit def javaLong2Id(jl: java.lang.Long): Identifier = new Identifier(jl.longValue)
+  implicit def javaInt2Id(ji: java.lang.Integer): Identifier = new Identifier(ji.longValue())
   implicit def id2JavaLong(id: Identifier): java.lang.Long = java.lang.Long.valueOf(id.id)
   implicit def any2Id(o: Any): Identifier = o match {
-    case s: String => string2Id(s)
     case l: Long => long2Id(l)
-    case default => throw UnsupportedIdFormatException(Some(default))
+    case jl: java.lang.Long => javaLong2Id(jl)
+    case i: Int => int2Id(i)
+    case ji: java.lang.Integer => javaInt2Id(ji)
+    case id: Identifier => id
+    case s: String => javaString2Id(s)
+    case default => throw UnsupportedIdFormatException(Option(default))
   }
 }

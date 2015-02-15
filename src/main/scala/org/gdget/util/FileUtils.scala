@@ -1,6 +1,6 @@
 /** contextual-stability
   *
-  * Copyright (c) 2014 Hugo Firth
+  * Copyright (c) 2015 Hugo Firth
   * Email: <me@hugofirth.com/>
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,14 +15,25 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental.graph.partition
+package org.gdget.util
+
+import java.io.File
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class PartitionEdgeSpec {
-  //Can tell if cross-partition
+object FileUtils {
 
-  //Should be able to return both vertices, with global ids
+  def removeAll(path: String) = {
+    def getRecursively(f: File): Seq[File] =
+      f.listFiles.filter(_.isDirectory).flatMap(getRecursively) ++ f.listFiles
+    val top = new File(path)
+    getRecursively(top).foreach{f =>
+      if (!f.delete())
+        throw new RuntimeException("Failed to delete " + f.getAbsolutePath)}
+    if (!top.delete())
+      throw new RuntimeException("Failed to delete " + top.getAbsolutePath)
+  }
+
 }

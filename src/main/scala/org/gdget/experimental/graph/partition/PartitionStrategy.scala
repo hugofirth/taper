@@ -19,8 +19,9 @@ package org.gdget.experimental.graph.partition
 
 import com.tinkerpop.blueprints.impls.neo4j2.Neo4j2Graph
 import com.tinkerpop.blueprints.impls.tg.TinkerGraph
-import com.tinkerpop.blueprints.util.ElementHelper
-import com.tinkerpop.blueprints.{Direction, Graph}
+import com.tinkerpop.blueprints.util.{ExceptionFactory, ElementHelper}
+import com.tinkerpop.blueprints.{Vertex, Direction, Graph}
+import org.gdget.experimental.graph.{UnsupportedImplException, UnsupportedIdFormatException, EdgeWithIdDoesNotExistException}
 import org.gdget.util.Identifier
 
 import scala.collection.JavaConverters._
@@ -30,71 +31,156 @@ import scala.collection.mutable
   *
   * @author hugofirth
   */
-trait PartitionStrategy {
-  def execute(graph: Graph,
-              numPartitions: Int,
-              parent: PartitionedGraph): (Map[Int, Partition], mutable.MultiMap[Identifier, Int], Long)
-  def createEmptySubGraph(graph: Graph): Graph = graph match {
-    case graph: TinkerGraph => new TinkerGraph()
-    case graph: Neo4j2Graph => ???
-    case _ => ??? //Throw unsupported implementation exception or something
+sealed trait PartitionStrategy {
+
+  protected var subGraphCounter: Int = 0
+  private val defaults: Map[String, String] = Map(
+    "output.root" -> "target",
+    "output.directory" -> ""
+  )
+  private val properties: mutable.Map[String, String] = mutable.Map()
+
+  def getProps(key: String): Option[String] = properties.get(key).orElse(defaults.get(key))
+
+  protected def props(props: (String, String)*): mutable.Map[String, String] = this.properties ++= props
+
+  def incrementAndGetSubGraphLocation(): String = {
+    subGraphCounter += 1
+    //Safe to use .get here as I know these are either defaults or user specified values
+    getProps("output.root").get+"/"+getProps("output.directory").get+"/"+"graph-"+subGraphCounter
   }
 
+  def execute(graph: Graph,
+              numPartitions: Int,
+              parent: PartitionedGraph): (Map[Int, Partition], Long)
+  //TODO: implement proper Neo4j support rather than just importing Neo4j to Tinker
+  def createEmptySubGraph(graph: Graph): Graph = graph match {
+    case g: TinkerGraph => new TinkerGraph(incrementAndGetSubGraphLocation())
+    case g: Neo4j2Graph => new TinkerGraph(incrementAndGetSubGraphLocation()) //new Neo4j2Graph(getSubGraphLocation())
+    case g => throw new UnsupportedImplException(Some(graph.getClass.getSimpleName))
+  }
+
+  def createExternalVertex(g: Graph, v: Vertex, ext: Int): Vertex = {
+    val newVertex = g.addVertex(null)
+    ElementHelper.copyProperties(v, newVertex)
+    newVertex.setProperty("__external", ext)
+    newVertex
+  }
 }
 
-/** The PartitionStrategy object for creating a simple, "Hash-based", graph partition.
+object HashPartitionStrategy {
+  def apply(props: (String, String)*): HashPartitionStrategy = {
+    val strategy = new HashPartitionStrategy
+    strategy.props(props:_*)
+    strategy
+  }
+}
+
+/** The PartitionStrategy class for creating a simple, "Hash-based", graph partition.
   *
   * @author hugofirth
   */
-object HashPartition extends PartitionStrategy {
+class HashPartitionStrategy extends PartitionStrategy {
+
 
   /** Simplistic early implementation of Hash partitioning algorithm. Relies upon all sub graphs fitting into memory.
     *
-    * @todo Adapt the partition to periodically persist the partitions to free up memory.
-    * @todo Generalise graph implementation choice - perhaps with dependency injection or a factory?
-    * @todo Make and return partitions from here, keep counter of elements created and pass that onto PartitionedGraph
+    *
     *
     * @param graph The parent graph to be sub divided.
     * @param numPartitions The number of sub graphs to create
     * @return The set of created sub graphs along with associated vertex/edge  global -> local Id maps
     */
+  //TODO: Adapt the partition to periodically persist the partitions to free up memory?
+  //TODO: Adapt to produce min ID count for each partition and pass it on during construction
   override def execute(graph: Graph,
                        numPartitions: Int,
-                       parent: PartitionedGraph): (Map[Int, Partition], mutable.MultiMap[Identifier, Int], Long) = {
+                       parent: PartitionedGraph): (Map[Int, Partition], Long) = {
+
+    subGraphCounter = 0
 
     val subGraphs = for(i <- 0 until numPartitions ) yield createEmptySubGraph(graph)
     val vertexIdMaps = for(i <- 0 until numPartitions) yield mutable.Map[Identifier, Identifier]()
     val edgeIdMaps = for(i <- 0 until numPartitions) yield mutable.Map[Identifier, Identifier]()
+    val extVertexIdMaps = for(i <- 0 until numPartitions) yield mutable.Map[Identifier, Identifier]()
 
     val vertices = graph.getVertices.asScala
     val partitionKeys = Iterator.continually((0 until numPartitions).toIterator).flatten
-    val edgesSeen = new mutable.HashMap[Identifier, mutable.Set[Int]] with mutable.MultiMap[Identifier, Int]
     var maxId: Identifier = 0L
 
     vertices.foreach { v =>
-      val key = partitionKeys.next()
-      val newVertex = subGraphs(key).addVertex(null)
+      val subGraphIdx = partitionKeys.next()
+      val newVertex = subGraphs(subGraphIdx).addVertex(null)
 
       maxId = if(maxId < v.getId) v.getId else maxId
-      vertexIdMaps(key)(v.getId) = newVertex.getId
+      vertexIdMaps(subGraphIdx)(v.getId) = newVertex.getId
       ElementHelper.copyProperties(v, newVertex)
       newVertex.setProperty("__globalId", v.getId)
-      v.getEdges(Direction.BOTH).asScala.foreach { e =>
-        if(!edgesSeen.entryExists(e.getId, _ == key)) {
-          //If Edge doesn't already exist locally then do
-          val newEdge = subGraphs(key).addEdge(null, e.getVertex(Direction.OUT), e.getVertex(Direction.IN), e.getLabel)
-          maxId = if(maxId < e.getId) e.getId else maxId
-          edgeIdMaps(key)(e.getId) = newEdge.getId
-          ElementHelper.copyProperties(e, newEdge)
-          edgesSeen.addBinding(e.getId, key)
-        }
-      }
+      val label = v.getProperty[String](getProps("vertex.labelKey").getOrElse("__label"))
+      newVertex.setProperty("__label", if(label == null) { "NA" } else { label })
+      //TODO: Handle labels for more than just Tinker. Maybe use allow a partial function to do some transformation for each?
     }
+
+    val edges = graph.getEdges.asScala
+
+    //TODO: cleanup this horrible horrible hash partitioning code. Make more "scala-like" and comment at least!
+    edges.foreach { e =>
+      //Work out which sub graph outgoing vertex is in and add edge to that
+      val globalOutVertexId = e.getVertex(Direction.OUT).getId
+      val globalInVertexId = e.getVertex(Direction.IN).getId
+      val outSubGraphIdx = vertexIdMaps.zipWithIndex.find( _._1.contains(globalOutVertexId) )
+        .getOrElse( throw ExceptionFactory.vertexWithIdDoesNotExist(globalOutVertexId) )._2
+      val inSubGraphIdx = vertexIdMaps.zipWithIndex.find( _._1.contains(globalInVertexId) )
+        .getOrElse( throw ExceptionFactory.vertexWithIdDoesNotExist(globalInVertexId) )._2
+      val localOutVertexId = vertexIdMaps(outSubGraphIdx)(globalOutVertexId)
+      val localInVertexId = vertexIdMaps(inSubGraphIdx)(globalInVertexId)
+
+      if(outSubGraphIdx == inSubGraphIdx) {
+        //Lookup vertex ids local to their containing subgraphs
+        val subGraph = subGraphs(outSubGraphIdx)
+        val newEdge = subGraph.addEdge(null, subGraph.getVertex(localOutVertexId), subGraph.getVertex(localInVertexId), e.getLabel)
+        maxId = if(maxId < e.getId) e.getId else maxId
+        edgeIdMaps(outSubGraphIdx)(e.getId) = newEdge.getId
+        newEdge.setProperty("__globalId", e.getId)
+        ElementHelper.copyProperties(e, newEdge)
+      } else {
+        //If edge is cross partition create 2 edges and an external vertex
+        val outSubGraph = subGraphs(outSubGraphIdx)
+        val inSubGraph = subGraphs(inSubGraphIdx)
+        val extOutVertexId = extVertexIdMaps(inSubGraphIdx).get(globalOutVertexId)
+        val extOutVertex = if(extOutVertexId.isDefined) {
+          inSubGraph.getVertex(extOutVertexId.get)
+        } else {
+          val newExtVertex = createExternalVertex(inSubGraph, outSubGraph.getVertex(localOutVertexId), outSubGraphIdx)
+          extVertexIdMaps(inSubGraphIdx)(globalOutVertexId) = newExtVertex.getId
+          newExtVertex
+        }
+        val extInVertexId = extVertexIdMaps(outSubGraphIdx).get(globalInVertexId)
+        val extInVertex = if(extInVertexId.isDefined) {
+          outSubGraph.getVertex(extInVertexId.get)
+        } else {
+          val newExtVertex = createExternalVertex(outSubGraph, inSubGraph.getVertex(localInVertexId), inSubGraphIdx)
+          extVertexIdMaps(outSubGraphIdx)(globalInVertexId) = newExtVertex.getId
+          newExtVertex
+        }
+        val newOutEdge = outSubGraph.addEdge(null, outSubGraph.getVertex(localOutVertexId), extInVertex, e.getLabel)
+        val newInEdge = inSubGraph.addEdge(null, extOutVertex, inSubGraph.getVertex(localInVertexId), e.getLabel)
+        maxId = if(maxId < e.getId) e.getId else maxId
+        edgeIdMaps(outSubGraphIdx)(e.getId) = newOutEdge.getId
+        edgeIdMaps(inSubGraphIdx)(e.getId) = newInEdge.getId
+        ElementHelper.copyProperties(e, newOutEdge)
+        ElementHelper.copyProperties(e, newInEdge)
+        newInEdge.setProperty("__globalId", e.getId)
+        newOutEdge.setProperty("__globalId", e.getId)
+      }
+
+    }
+
 
     val partitions = for(i <- 0 until numPartitions) yield {
       (i, Partition(subGraphs(i), parent, vertexIdMaps(i), edgeIdMaps(i), i))
     }
-    (partitions.toMap, edgesSeen, maxId)
+    (partitions.toMap, maxId)
   }
 }
 
@@ -103,8 +189,8 @@ object HashPartition extends PartitionStrategy {
   *
   * @author hugofirth
   */
-object SpectralPartition extends PartitionStrategy {
+class SpectralPartitionStrategy extends PartitionStrategy {
   override def execute(graph: Graph,
                        numPartitions: Int,
-                       parent: PartitionedGraph): (Map[Int, Partition], mutable.MultiMap[Identifier, Int], Long) = ???
+                       parent: PartitionedGraph): (Map[Int, Partition], Long) = ???
 }

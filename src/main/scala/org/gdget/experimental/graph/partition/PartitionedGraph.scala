@@ -19,20 +19,19 @@
 package org.gdget.experimental.graph.partition
 
 import java.util.concurrent.atomic.AtomicLong
+import java.lang.{Iterable => JIterable}
 
 import com.tinkerpop.blueprints._
 import com.tinkerpop.blueprints.util.{DefaultGraphQuery, ExceptionFactory}
-import org.gdget.util.Identifier
+import org.gdget.experimental.graph.TraversalPatternSummary
+import org.gdget.util.{Counting, Identifier}
 
-import scala.collection.mutable
 import scala.collection.JavaConverters._
+
 
 
 sealed trait PartitionedGraph extends Graph {
   /** Returns a list of all Partitions in the Graph.
-    *
-    * In a LocalPartitionedGraph this will return all the partitions in the graph.
-    * In a DistributedPartitionedGraph this will return all the partitions available locally.
     *
     * @return an `Iterable` containing [[org.gdget.experimental.graph.partition.Partition]] objects
     */
@@ -45,11 +44,27 @@ sealed trait PartitionedGraph extends Graph {
     */
   def getPartitionById(partitionId: Int): Option[Partition]
 
-  /** Returns the next Long id for an element in the graph. Should be atomic or rely on some consensus.
+  /** Returns the next Long id for an element in the graph.
     *
     * @return a `Long` to act as an [[com.tinkerpop.blueprints.Element]] object id
     */
   private[partition] def getNextElementId: Long
+
+  /** Returns a summary of the common traversal operations and their frequencies
+    *
+    * @return a `TraversalPatternSummary` object
+    */
+  def traversalSummary: TraversalPatternSummary
+
+
+  /** Override [[com.tinkerpop.blueprints.Graph]] methods without implementation in PartitionedGraph trait to declare
+    * covariant return types.
+    */
+  override def getEdge(id: scala.Any): PartitionEdge
+  override def getVertex(id: scala.Any): PartitionVertex
+  override def addEdge(id: scala.Any, outVertex: Vertex, inVertex: Vertex, label: String): PartitionEdge
+  override def addVertex(id: scala.Any): PartitionVertex
+
 }
 
 /** Factory for [[org.gdget.experimental.graph.partition.PartitionedGraph]] instances. */
@@ -58,30 +73,30 @@ object PartitionedGraph {
     *
     * The original must be either a Neo4jGraph or a TinkerGraph.
     *
-    * @todo Use generic graph and allow passing of ENUM to specify graph implementation.
-    *
     * @param graph the original graph
     * @param strategy [[org.gdget.experimental.graph.partition.PartitionStrategy]] object defining the method of
     *                subdividing the graph
     * @param numPartitions an `Int` number of partitions to be created
+    * @param trie a `TraversalPatternSummary` which summarises frequencies associated with sequences of traversals
     * @param distributed a `Boolean` which represents whether the graph will be distributed across machines
     * @return The created PartitionedGraph object
     */
-  def apply(graph: Graph, strategy: PartitionStrategy, numPartitions: Int, distributed: Boolean = false) = {
+  def apply(graph: Graph,
+            strategy: PartitionStrategy,
+            numPartitions: Int,
+            trie: TraversalPatternSummary,
+            distributed: Boolean = false) = {
     if(distributed) {
       ???
     } else {
       //Get the list of subgraphs and create partitions out of them
       var partitions: Map[Int, Partition] = Map()
-      var edgePartitions: mutable.MultiMap[Identifier, Int] = new mutable.HashMap[Identifier, mutable.Set[Int]]
-        with mutable.MultiMap[Identifier, Int]
       var initialId = 0L
-      val partitionedGraph = new LocalPartitionedGraph(graph, partitions, edgePartitions, initialId)
+      val partitionedGraph = new LocalPartitionedGraph(graph, partitions, trie, initialId) with Counting
       val partitionComponents = strategy.execute(graph, numPartitions, partitionedGraph)
       //Add Partitions to a map Int => Partition
       partitions = partitionComponents._1
-      edgePartitions = partitionComponents._2
-      initialId = partitionComponents._3
+      initialId = partitionComponents._2
       //Return PartitionedGraph
       partitionedGraph
     }
@@ -93,16 +108,16 @@ object PartitionedGraph {
   * @constructor creates a new locally partitioned graph from a base graph, a map of partitions and a map of edges
   * @param graph the base graph
   * @param partitionMap a map of partitions to their integer identifiers
-  * @param edgePartitions a map of global edge identifiers to the set of partition identifiers representing where they may be found
   * @author hugofirth
   */
+//TODO: update ids to be globalId case class at top level (Int, Identifier)
+//TODO: update use of Pattern matching to resolve Options to a .map() call instead
 class LocalPartitionedGraph private[partition] (graph: Graph,
                                      partitionMap: => Map[Int, Partition],
-                                     edgePartitions: => mutable.MultiMap[Identifier, Int],
+                                     val traversalSummary: TraversalPatternSummary,
                                      initialId: => Long = 0) extends PartitionedGraph {
 
   private lazy val partitions = partitionMap
-  private lazy val edgeMap = edgePartitions
   private val features = graph.getFeatures
   private lazy val counter = new AtomicLong(initialId)
 
@@ -110,92 +125,97 @@ class LocalPartitionedGraph private[partition] (graph: Graph,
 
   override def getPartitionById(partitionId: Int): Option[Partition] = partitions.get(partitionId)
 
-  private def getEdgeFromPartition(partitionId: Int, edgeId: Long): Edge = {
-    getPartitionById(partitionId) match {
-      case Some(p) => p.getEdge(edgeId)
-      case None => throw PartitionDoesNotExistException(Some(partitionId))
-    }
-  }
-
   override def getFeatures: Features = features
 
-  override def getEdge(id: scala.Any): Edge = {
+  override def getEdge(id: scala.Any): PartitionEdge = {
     if(id == null) throw ExceptionFactory.edgeIdCanNotBeNull()
-    val idAsLong: Long = id.asInstanceOf[Long]
-    edgeMap.get(idAsLong) match {
-      case Some(p: Set[Int]) => getEdgeFromPartition(p.head, idAsLong)
-      case _ => null //If edge not in map, return null as per reference implementation
-    }
+    this.getEdgePartitionById(id).map( _.getEdge(id) ).orNull
+    //If edge not in map, return null as per reference implementation
   }
 
-  override def shutdown(): Unit = partitions.values.foreach(p => p.shutdown())
+  override def shutdown(): Unit = partitions.values.foreach( _.shutdown() )
 
-  override def getVertex(id: scala.Any): Vertex = {
+  override def getVertex(id: scala.Any): PartitionVertex = {
     if(id == null) throw ExceptionFactory.vertexIdCanNotBeNull()
-    val idAsLong: Long = id.asInstanceOf[Long]
-    val partition = this.partitions.values.find(p => p.getVertex(idAsLong) != null)
-    partition match {
-      case Some(p) => p.getVertex(idAsLong)
-      case None => null //If vertex not in graph, return null as per reference implementation
-    }
+    this.getVertexPartitionById(id).map( _.getVertex(id) ).orNull
+    //If vertex not in map, return null as per reference implementation
   }
 
-  override def addEdge(id: scala.Any, outVertex: Vertex, inVertex: Vertex, label: String): Edge = {
+  override def addEdge(id: scala.Any, outVertex: Vertex, inVertex: Vertex, label: String): PartitionEdge = {
+    val parOutVertex = outVertex.asInstanceOf[PartitionVertex]
+    val parInVertex = inVertex.asInstanceOf[PartitionVertex]
+
     if(label == null) throw ExceptionFactory.edgeLabelCanNotBeNull()
-    //NOTE: UNSAFE CASTS... Here there be dragons...
-    val outVertexPartition = this.partitions.values.find(p => p.getVertex(outVertex.getId.asInstanceOf[Long]) != null).get
-    val inVertexPartition = this.partitions.values.find(p => p.getVertex(inVertex.getId.asInstanceOf[Long]) != null).get
-    val idAsLong = id.asInstanceOf[Long]
-    val edge = if(outVertexPartition == inVertexPartition) {
-      outVertexPartition.addEdge(idAsLong, outVertex, inVertex, label)
-    } else {
-      outVertexPartition.addEdge(idAsLong, outVertex, inVertex, label, Some(inVertex, inVertexPartition.id))
-      inVertexPartition.addEdge(idAsLong, outVertex, inVertex, label, Some(outVertex, outVertexPartition.id))
+    val outVertexPartition = this.getVertexPartition(parOutVertex).getOrElse {
+      throw ExceptionFactory.vertexWithIdDoesNotExist(parOutVertex.getId)
     }
-    edge
+    val inVertexPartition = this.getVertexPartition(parInVertex).getOrElse {
+      throw ExceptionFactory.vertexWithIdDoesNotExist(parInVertex.getId)
+    }
+    if(outVertexPartition == inVertexPartition) {
+      outVertexPartition.addEdge(parOutVertex, parInVertex, label)
+    } else {
+      inVertexPartition.addEdge(parOutVertex, parInVertex, label, Some(parOutVertex, outVertexPartition.id))
+      outVertexPartition.addEdge(parOutVertex, parInVertex, label, Some(parInVertex, inVertexPartition.id))
+    }
   }
 
 
   override def removeVertex(vertex: Vertex): Unit = {
-    val idAsLong: Long = vertex.getId.asInstanceOf[Long]
-    val partition = this.partitions.values.find(p => p.getVertex(idAsLong) != null)
-    partition match {
-      case Some(p) => p.removeVertex(vertex)
-      case None => throw ExceptionFactory.vertexWithIdDoesNotExist(idAsLong)
+    //Unsafe Cast - here there be dragons
+    val parVertex = vertex.asInstanceOf[PartitionVertex]
+    val partitions = this.getVertexPartitions(parVertex)
+    if(partitions.isEmpty) {
+      //If vertex not found, throw Exception as per reference implementation
+      throw ExceptionFactory.vertexWithIdDoesNotExist(vertex.getId)
     }
+    partitions.map( _.removeVertex(parVertex) )
   }
 
-  override def addVertex(id: scala.Any): Vertex = this.partitions.values.head.addVertex(id.asInstanceOf[Long])
+  //TODO: Create a sensible and balanced approach for adding vertices to partitions
+  override def addVertex(id: scala.Any): PartitionVertex = this.partitions.values.head.addVertex()
 
-  override def getEdges: java.lang.Iterable[Edge] = {
-    //NOTE: May contain duplicates
-    val edgeIterables: Iterable[Iterable[Edge]] = this.partitions.values.map(p => p.getEdges)
+  override def getEdges: JIterable[Edge] = {
+    //TODO: Work out if this can ever contain duplicates or if we are truly edge disjoint?
+    val edgeIterables: Iterable[Iterable[Edge]] = this.partitions.values.map( _.getEdges )
     edgeIterables.foldLeft(Iterable.empty[Edge])( (accum, e) => accum ++ e ).asJava
   }
 
-  override def getEdges(s: String, o: scala.Any): java.lang.Iterable[Edge] = ???
+  override def getEdges(s: String, o: scala.Any): JIterable[Edge] = ???
 
   override def removeEdge(edge: Edge): Unit = {
-    val idAsLong: Long = edge.getId.asInstanceOf[Long]
-    val edgePartitionIndices = edgeMap.get(idAsLong)
-    if(edgePartitionIndices.isDefined) {
-      edgePartitionIndices.get.foreach { i =>
-        getPartitionById(i) match {
-          case Some(p) => p.removeEdge(edge)
-          case None => throw PartitionDoesNotExistException(Some(i))
-        }
-      }
-    }
+    //Unsafe Cast - here there be dragons
+    val parEdge = edge.asInstanceOf[PartitionEdge]
+    this.getEdgePartitions(parEdge).map( _.removeEdge(parEdge) )
   }
 
   override def query(): GraphQuery = new DefaultGraphQuery(this)
 
-  override def getVertices: java.lang.Iterable[Vertex] = {
-    val vertexIterables: Iterable[Iterable[Vertex]] = partitions.values.map(p => p.getVertices)
+  override def getVertices: JIterable[Vertex] = {
+    //May contain duplicates
+    val vertexIterables: Iterable[Iterable[Vertex]] = partitions.values.map( _.getVertices )
     vertexIterables.foldLeft(Iterable.empty[Vertex])( (accum, v) => accum ++ v ).asJava
   }
 
-  override def getVertices(s: String, o: scala.Any): java.lang.Iterable[Vertex] = ???
+  override def getVertices(s: String, o: scala.Any): JIterable[Vertex] = ???
 
   override def getNextElementId = counter.incrementAndGet()
+
+  //TODO: When checking partitions for Elements, if external copies are found then use those to link to the real element quicker
+  private def getVertexPartition(vertex: PartitionVertex): Option[Partition] = this.getVertexPartitionById(vertex.getId)
+
+  private def getVertexPartitions(vertex: PartitionVertex): Iterable[Partition] = this.getVertexPartitionsById(vertex.getId)
+
+  private def getEdgePartition(edge: PartitionEdge): Option[Partition] = this.getEdgePartitionById(edge.getId)
+
+  private def getEdgePartitions(edge: PartitionEdge): Iterable[Partition] = this.getEdgePartitionsById(edge.getId)
+
+  private def getVertexPartitionById(id: Identifier): Option[Partition] = this.partitions.values.find( _.getVertex(id) != null )
+
+  private def getVertexPartitionsById(id: Identifier): Iterable[Partition] = this.partitions.values.filter( _.getVertex(id) != null )
+
+  private def getEdgePartitionById(id: Identifier): Option[Partition] = this.partitions.values.find( _.getEdge(id) != null )
+
+  private def getEdgePartitionsById(id: Identifier): Iterable[Partition] = this.partitions.values.filter( _.getEdge(id) != null )
+
 }

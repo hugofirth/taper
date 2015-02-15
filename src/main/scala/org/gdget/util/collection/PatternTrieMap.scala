@@ -1,6 +1,6 @@
 /** contextual-stability
   *
-  * Copyright (c) 2014 Hugo Firth
+  * Copyright (c) 2015 Hugo Firth
   * Email: <me@hugofirth.com/>
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,12 +15,25 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental.graph.partition
+package org.gdget.util.collection
+
+import scala.collection.immutable
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class PartitionVertexSpec {
-  //Should be able to return all neighbours, including externals
+class PatternTrieMap[A,B](kv:(Seq[A],B)*) extends Map[Seq[A],B] with immutable.MapLike[Seq[A],B, PatternTrieMap[A, B]] {
+
+  val suffixes: Map[A, PatternTrieMap[A, B]] = Map.empty
+
+  override def +[C >: B](kv: (Seq[A], C)): Map[Seq[A], C] = ???
+
+  override def get(key: Seq[A]): Option[B] = ???
+
+  override def iterator: Iterator[(Seq[A], B)] = ???
+
+  override def -(key: Seq[A]): PatternTrieMap[A, B] = ???
+
+  override def empty = new PatternTrieMap[A,B]
 }

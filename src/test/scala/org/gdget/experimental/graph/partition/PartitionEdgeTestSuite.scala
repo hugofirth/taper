@@ -1,5 +1,4 @@
-/**
-  * contextual-stability
+/** contextual-stability
   *
   * Copyright (c) 2014 Hugo Firth
   * Email: <me@hugofirth.com/>
@@ -18,17 +17,17 @@
   */
 package org.gdget.experimental.graph.partition
 
-/** Marker trait for exceptions thrown from the [[org.gdget.experimental.graph.partition]] package. */
-sealed trait PartitionException extends RuntimeException
-object PartitionException {
-  def unapply(e: PartitionException): Option[(String, Throwable)] = Some(e.getMessage -> e.getCause)
-}
+import org.gdget.UnitSpec
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
 
-/**
+/** Description of Class
   *
-  * @param partitionId
-  * @param cause
+  * @author hugofirth
   */
-case class PartitionDoesNotExistException(partitionId: Option[Int] = None, cause: Option[Throwable] = None)
-  extends RuntimeException("The partition with id "+partitionId.getOrElse("N/A")+" could not be found!", cause.orNull)
-  with PartitionException
+@RunWith(classOf[JUnitRunner])
+class PartitionEdgeTestSuite extends UnitSpec {
+  //Can tell if cross-partition
+
+  //Should be able to return both vertices, with global ids
+}

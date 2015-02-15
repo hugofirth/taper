@@ -17,10 +17,15 @@
   */
 package org.gdget.experimental.graph.partition
 
+import org.gdget.UnitSpec
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+
 /** Description of Class
   *
   * @author hugofirth
   */
-class PartitionSpec {
-
+@RunWith(classOf[JUnitRunner])
+class PartitionVertexTestSuite extends UnitSpec {
+  //Should be able to return all neighbours, including externals
 }

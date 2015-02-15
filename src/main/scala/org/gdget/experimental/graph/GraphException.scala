@@ -24,11 +24,29 @@ object GraphException {
 }
 
 /**
- *
- * @param id
- * @param cause
- */
+  *
+  * @param id
+  * @param cause
+  */
 case class UnsupportedIdFormatException(id: Option[Any] = None, cause: Option[Throwable] = None)
-  extends RuntimeException("The id: "+ id.getOrElse("N/A") +" is not of an accepted format (String or Long)!", cause.orNull)
+  extends RuntimeException("The id: "+ id.getOrElse("N/A") +" is not of an accepted format (String, Int or Long)!", cause.orNull)
   with GraphException
+
+/**
+  *
+  * @param graphType
+  * @param cause
+  */
+case class UnsupportedImplException(graphType: Option[String] = None, cause: Option[Throwable] = None)
+  extends RuntimeException("The graph database: " + graphType + " is not a supported underlying implementation for " +
+    "PartitionedGraph.", cause.orNull) with GraphException
+
+
+/**
+  *
+  * @param id
+  * @param cause
+  */
+case class EdgeWithIdDoesNotExistException(id: Option[Any] = None, cause: Option[Throwable] = None)
+  extends RuntimeException("Edge with id does not exist: "+ id.getOrElse("N/A"), cause.orNull) with GraphException
 

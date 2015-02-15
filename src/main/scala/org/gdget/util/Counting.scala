@@ -1,6 +1,6 @@
 /** contextual-stability
   *
-  * Copyright (c) 2014 Hugo Firth
+  * Copyright (c) 2015 Hugo Firth
   * Email: <me@hugofirth.com/>
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,14 +17,14 @@
   */
 package org.gdget.util
 
-/** Opt is a wrapper class for Option to allow for a cleaner API surface.
+/** Description of Class
   *
   * @author hugofirth
   */
-class Opt[T] private (val option: Option[T])
+trait Counting {
 
-object Opt {
-  implicit def any2opt[T](t: T): Opt[T] = new Opt(Option(t)) // NOT Some(t)
-  implicit def option2opt[T](o: Option[T]): Opt[T] = new Opt(o)
-  implicit def opt2option[T](o: Opt[T]): Option[T] = o.option
+  private var counter: Long = 0L
+  def getCount: Long = counter
+  def count(): Long = {counter += 1; counter}
+
 }
