@@ -99,10 +99,12 @@ class PartitionSpec extends UnitSpec with DatabaseSpec {
 
   it should "be able to succesfully attempt a swap of an extraverted vertex with another partition" in {
     val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.75F)
-    val potential = pq.dequeue()
-    val destinations = partition.getPotentialDestPartitions(potential._1)
-    partition.getInternalVertices should contain (potential._1)
-    partition.attemptSwap(potential._1, potential._2/potential._3, destinations)
-    partition.getInternalVertices should not contain (potential._1)
+    val (vertex, introversion, probability) = pq.dequeue()
+    val destinations = partition.getPotentialDestPartitions(vertex)
+    partition.getInternalVertices should contain (vertex)
+    partition.attemptSwap(vertex, probability, destinations)
+    partition.getInternalVertices should not contain (vertex)
   }
+
+
 }

@@ -129,7 +129,7 @@ class LocalPartitionedGraph private[partition] (graph: Graph,
 
   override def getEdge(id: scala.Any): PartitionEdge = {
     if(id == null) throw ExceptionFactory.edgeIdCanNotBeNull()
-    this.getEdgePartitionById(id).map( _.getEdge(id) ).orNull
+    this.getEdgePartitionById(id).flatMap( _.getEdge(id) ).orNull
     //If edge not in map, return null as per reference implementation
   }
 
@@ -137,7 +137,7 @@ class LocalPartitionedGraph private[partition] (graph: Graph,
 
   override def getVertex(id: scala.Any): PartitionVertex = {
     if(id == null) throw ExceptionFactory.vertexIdCanNotBeNull()
-    this.getVertexPartitionById(id).map( _.getVertex(id) ).orNull
+    this.getVertexPartitionById(id).flatMap( _.getVertex(id) ).orNull
     //If vertex not in map, return null as per reference implementation
   }
 
@@ -210,12 +210,12 @@ class LocalPartitionedGraph private[partition] (graph: Graph,
 
   private def getEdgePartitions(edge: PartitionEdge): Iterable[Partition] = this.getEdgePartitionsById(edge.getId)
 
-  private def getVertexPartitionById(id: Identifier): Option[Partition] = this.partitions.values.find( _.getVertex(id) != null )
+  private def getVertexPartitionById(id: Identifier): Option[Partition] = this.partitions.values.find( _.getVertex(id).isDefined )
 
-  private def getVertexPartitionsById(id: Identifier): Iterable[Partition] = this.partitions.values.filter( _.getVertex(id) != null )
+  private def getVertexPartitionsById(id: Identifier): Iterable[Partition] = this.partitions.values.filter( _.getVertex(id).isDefined )
 
-  private def getEdgePartitionById(id: Identifier): Option[Partition] = this.partitions.values.find( _.getEdge(id) != null )
+  private def getEdgePartitionById(id: Identifier): Option[Partition] = this.partitions.values.find( _.getEdge(id).isDefined )
 
-  private def getEdgePartitionsById(id: Identifier): Iterable[Partition] = this.partitions.values.filter( _.getEdge(id) != null )
+  private def getEdgePartitionsById(id: Identifier): Iterable[Partition] = this.partitions.values.filter( _.getEdge(id).isDefined )
 
 }

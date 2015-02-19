@@ -40,12 +40,12 @@ class PartitionedGraphTestSuite extends Suites(new PartitionedNeoGraphSpec, new 
 class PartitionedTinkerGraphSpec extends UnitSpec with DatabaseSpec {
 
   val originalGraph = TinkerGraphFactory.createTinkerGraph()
-  var partitionedGraph: PartitionedGraph with Counting = null
+  var partitionedGraph: PartitionedGraph with Counting = _
 
   val originalGdGraph = new TinkerGraph()
   val input = new BufferedInputStream( this.getClass.getResourceAsStream("/graph-example-2.xml") )
   GraphMLReader.inputGraph(originalGdGraph, input)
-  var partitionedGdGraph: PartitionedGraph with Counting = null
+  var partitionedGdGraph: PartitionedGraph with Counting = _
   addDatabase(originalGdGraph, originalGraph)
 
   before {
@@ -168,23 +168,6 @@ class PartitionedTinkerGraphSpec extends UnitSpec with DatabaseSpec {
     val traversals = partitionedGdGraph.count
     result should equal (expected)
   }
-
-//  it should "work for me please" in {
-//    val frequencies = Map("Q1" -> 4, "Q2" -> 4)
-//    val summary = new TraversalPatternSummary(frequencies, 4)
-//    summary.trie addBinding(Seq("song", "artist"), "Q1")
-//    summary.trie addBinding(Seq("artist", "song", "song", "artist"), "Q2")
-//    val strategy = HashPartitionStrategy("vertex.labelKey" -> "type", "output.directory" -> "gratefulNew")
-//    partitionedGdGraph = PartitionedGraph(originalGdGraph, strategy, 3, summary)
-//    val partition = partitionedGdGraph.getPartitionById(0)
-//    val test = partition.map(_.getPotentialOutcastVertices)
-//    val longPaths = partition.get.visitorMatrix.withPrefix(Seq.empty[PartitionVertex]).filter { case (path, probability) => path.size>2 }
-//    val internalArtists = partition.get.getVertices.filter { v =>
-//      (v.getProperty[String]("__label") == "artist") && (v.getProperty[String]("__external") == null)
-//    }
-//    assert(true)
-//  }
-
 
 }
 

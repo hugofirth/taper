@@ -178,7 +178,7 @@ class HashPartitionStrategy extends PartitionStrategy {
 
 
     val partitions = for(i <- 0 until numPartitions) yield {
-      (i, Partition(subGraphs(i), parent, vertexIdMaps(i), edgeIdMaps(i), i))
+      (i, Partition(subGraphs(i), parent, vertexIdMaps(i), edgeIdMaps(i), extVertexIdMaps(i), i))
     }
     (partitions.toMap, maxId)
   }

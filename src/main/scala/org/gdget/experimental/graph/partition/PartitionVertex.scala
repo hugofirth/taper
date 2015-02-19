@@ -55,8 +55,8 @@ sealed trait External extends PartitionVertex {
 object PartitionVertex {
   def apply(toBeWrapped: Vertex, globalId: Identifier, partition: Partition) = toBeWrapped match {
     case v: PartitionVertex => v
-    case v if v.getProperty[Int]("__external") != null => new PartitionVertex(toBeWrapped, globalId, partition) with External
-    case v => new PartitionVertex(toBeWrapped, globalId, partition) with Internal
+    case v if Option(v.getProperty[Int]("__external")).isDefined => new PartitionVertex(v, globalId, partition) with External
+    case v => new PartitionVertex(v, globalId, partition) with Internal
   }
   def unapply(v: PartitionVertex): Option[Vertex] = Some(v.wrapped)
   def unwrap(v: Vertex): Vertex = v match {
@@ -86,7 +86,7 @@ class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val pa
   }
 
   private[partition] def getPartitionEdges(direction: Direction, labels: String*): Iterable[PartitionEdge] = {
-    getEdges(direction, labels:_*).asScala.view.map( _.asInstanceOf[PartitionEdge] )
+    getEdges(direction, labels:_*).asScala.map( _.asInstanceOf[PartitionEdge] )
   }
 
   override def addEdge(label: String, other: Vertex): PartitionEdge = {
@@ -106,7 +106,7 @@ class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val pa
   }
 
   private[partition] def getPartitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] = {
-    getVertices(direction, labels:_*).asScala.view.map( _.asInstanceOf[PartitionVertex] )
+    getVertices(direction, labels:_*).asScala.map( _.asInstanceOf[PartitionVertex] )
   }
 
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)
