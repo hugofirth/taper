@@ -40,7 +40,7 @@ object Main extends App{
     val input = new BufferedInputStream( this.getClass.getResourceAsStream("/graph-example-2.xml") )
     GraphMLReader.inputGraph(originalGdGraph, input)
     var partitionedGdGraph: PartitionedGraph with Counting = null
-    val frequencies = Map("Q1" -> 10, "Q2" -> 1)
+    val frequencies = Map("Q1" -> 10, "Q2" -> 10)
     val summary = new TraversalPatternSummary(frequencies, 4)
     summary.trie addBinding(Seq("song", "artist"), "Q1")
     summary.trie addBinding(Seq("artist", "song", "song", "artist"), "Q2")
@@ -50,14 +50,14 @@ object Main extends App{
     partitionedGdGraph.getPartitions.foreach { p => println("Partition "+p.id+" has size "+p.getVertices.size) }
     var base = partitionedGdGraph.getCount
 
-    for(i <- 0 until 100) { partitionedGdGraph.v(i).startPipe.out("written_by").map { _("name") }.toSet() }
+    for(i <- 0 until 10) { partitionedGdGraph.v(i).startPipe.out("written_by").map { _("name") }.toSet() }
     val unrefinedQ1Count = partitionedGdGraph.getCount-base
-    println("Unrefined Q1 traversals given 100 executions :" + unrefinedQ1Count)
+    println("Unrefined Q1 traversals given 10 executions :" + unrefinedQ1Count)
 
     base = partitionedGdGraph.getCount
 
     for(i <- 0 until 10) {
-      partitionedGdGraph.V.has("name", "Bo_Diddley").in("written_by").outE("followed_by").dedup.order({
+      partitionedGdGraph.V.has("type", "artist").in("written_by").outE("followed_by").dedup.order({
         (left: Edge, right: Edge) =>
           val weight = right.getProperty[Int]("weight").compareTo(left.getProperty[Int]("weight"))
           if(weight == 0) {
@@ -68,10 +68,8 @@ object Main extends App{
     val unrefinedQ2Count = partitionedGdGraph.getCount-base
     println("Unrefined Q2 traversals given 10 executions :" + unrefinedQ2Count)
 
-
-    //TODO: Look here for Vertex 527
     partitionedGdGraph.getPartitions.foreach{ p: Partition =>
-      val pq = p.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.5F)
+      val pq = p.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.2F)
       pq.dequeueAll.map { case (vertex, introversion, probability) =>
         p.attemptSwap(vertex, probability, p.getPotentialDestPartitions(vertex))
       }
@@ -79,16 +77,16 @@ object Main extends App{
 
     base = partitionedGdGraph.getCount
 
-    for(i <- 0 until 100) { partitionedGdGraph.v(i).startPipe.out("written_by").map { _("name") }.toSet() }
+    for(i <- 0 until 10) { partitionedGdGraph.v(i).startPipe.out("written_by").map { _("name") }.toSet() }
     val refinedQ1Count = partitionedGdGraph.getCount-base
-    println("Refined Q1 traversals given 100 executions :" + refinedQ1Count)
+    println("Once Refined Q1 traversals given 100 executions :" + refinedQ1Count)
 
     base = partitionedGdGraph.getCount
 
     println("base is "+base)
 
     for(i <- 0 until 10) {
-      partitionedGdGraph.V.has("name", "Bo_Diddley").in("written_by").outE("followed_by").dedup.order({
+      partitionedGdGraph.V.has("type", "artist").in("written_by").outE("followed_by").dedup.order({
         (left: Edge, right: Edge) =>
           val weight = right.getProperty[Int]("weight").compareTo(left.getProperty[Int]("weight"))
           if(weight == 0) {
@@ -97,7 +95,39 @@ object Main extends App{
       }).range(0,5).inV.out("written_by").property[String]("name").toList()
     }
     val refinedQ2Count = partitionedGdGraph.getCount-base
-    println("Refined Q2 traversals given 10 executions :" + refinedQ2Count)
+    println("Once Refined Q2 traversals given 10 executions :" + refinedQ2Count)
+    println("total is "+partitionedGdGraph.getCount)
+
+    partitionedGdGraph.getPartitions.foreach { p => println("Partition "+p.id+" has size "+p.getVertices.size) }
+
+    partitionedGdGraph.getPartitions.foreach{ p: Partition =>
+      val pq = p.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.2F)
+      pq.dequeueAll.map { case (vertex, introversion, probability) =>
+        p.attemptSwap(vertex, probability, p.getPotentialDestPartitions(vertex))
+      }
+    }
+
+    base = partitionedGdGraph.getCount
+
+    for(i <- 0 until 10) { partitionedGdGraph.v(i).startPipe.out("written_by").map { _("name") }.toSet() }
+    val refinedQ1Count2 = partitionedGdGraph.getCount-base
+    println("Twice Refined Q1 traversals given 100 executions :" + refinedQ1Count2)
+
+    base = partitionedGdGraph.getCount
+
+    println("base is "+base)
+
+    for(i <- 0 until 10) {
+      partitionedGdGraph.V.has("type", "artist").in("written_by").outE("followed_by").dedup.order({
+        (left: Edge, right: Edge) =>
+          val weight = right.getProperty[Int]("weight").compareTo(left.getProperty[Int]("weight"))
+          if(weight == 0) {
+            right.getVertex(Direction.IN).getProperty[String]("name").compareTo(left.getVertex(Direction.IN).getProperty[String]("name"))
+          } else weight
+      }).range(0,5).inV.out("written_by").property[String]("name").toList()
+    }
+    val refinedQ2Count2 = partitionedGdGraph.getCount-base
+    println("Twice Refined Q2 traversals given 10 executions :" + refinedQ2Count2)
     println("total is "+partitionedGdGraph.getCount)
 
     partitionedGdGraph.getPartitions.foreach { p => println("Partition "+p.id+" has size "+p.getVertices.size) }

@@ -23,9 +23,14 @@ import java.util.{Set => JSet}
 import com.tinkerpop.blueprints.util.DefaultVertexQuery
 import org.gdget.util.{Counting, Identifier}
 
+import scala.collection.IterableView
 import scala.collection.JavaConverters._
 
 import com.tinkerpop.blueprints._
+
+sealed trait Labellable { this: PartitionVertex =>
+  def getLabel: String = { this.getProperty[String]("__label") }
+}
 
 sealed trait Internal extends PartitionVertex {}
 
@@ -73,7 +78,7 @@ object PartitionVertex {
   *
   * @author hugofirth
   */
-class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val partition: Partition) extends Vertex {
+class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val partition: Partition) extends Vertex with Labellable {
 
   //Set globalId property to provided value - convert to Long because some Graph vendors limit property types
   wrapped.setProperty("__globalId", globalId.toLong)
@@ -98,15 +103,24 @@ class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val pa
 
   override def query(): VertexQuery = new DefaultVertexQuery(this)
 
+  private def getVerticesView(direction: Direction, labels: String*): Iterable[PartitionVertex] =
+    wrapped.getVertices(direction, labels: _*).asScala.view.map { v => PartitionVertex(v, v.getProperty[Any]("__globalId"), partition) }
+
   override def getVertices(direction: Direction, labels: String*): JIterable[Vertex] = {
-    val verticesView: Iterable[Vertex] =  wrapped.getVertices(direction, labels: _*).asScala.view.map { v =>
-      PartitionVertex(v, v.getProperty[Any]("__globalId"), partition)
-    }
+    val verticesView: Iterable[Vertex] = getVerticesView(direction, labels: _*)
     verticesView.asJava
   }
 
   private[partition] def getPartitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] = {
     getVertices(direction, labels:_*).asScala.map( _.asInstanceOf[PartitionVertex] )
+  }
+
+  private[partition] def getInternalVertices(direction: Direction, labels: String*): Iterable[Internal] = {
+    getVerticesView(direction, labels:_*).collect { case i: Internal => i }
+  }
+
+  private[partition] def getExternalVertices(direction: Direction, labels: String*): Iterable[External] = {
+    getVerticesView(direction, labels:_*).collect { case e: External => e }
   }
 
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)
