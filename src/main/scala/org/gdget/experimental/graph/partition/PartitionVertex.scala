@@ -78,10 +78,12 @@ object PartitionVertex {
   *
   * @author hugofirth
   */
-class PartitionVertex private (val wrapped: Vertex, globalId: Identifier, val partition: Partition) extends Vertex with Labellable {
+class PartitionVertex private (val wrapped: Vertex, val globalId: Identifier, val partition: Partition) extends Vertex with Labellable {
 
   //Set globalId property to provided value - convert to Long because some Graph vendors limit property types
   wrapped.setProperty("__globalId", globalId.toLong)
+
+
 
   override def getEdges(direction: Direction, labels: String*): JIterable[Edge] = {
     val edgesView: Iterable[Edge]= wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>

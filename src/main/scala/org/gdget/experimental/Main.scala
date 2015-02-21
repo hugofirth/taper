@@ -68,6 +68,8 @@ object Main extends App{
     val unrefinedQ2Count = partitionedGdGraph.getCount-base
     println("Unrefined Q2 traversals given 10 executions :" + unrefinedQ2Count)
 
+    //4 erroneously crops up for the first time after 0 has run its swaps to 1. In this small window the only code which
+    //ever changes the graph (and it must be changing the graph) is the receive method. Look here.
     partitionedGdGraph.getPartitions.foreach{ p: Partition =>
       val pq = p.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.2F)
       pq.dequeueAll.map { case (vertex, introversion, probability) =>

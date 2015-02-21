@@ -50,7 +50,7 @@ class Partition private (private[this] val subGraph: Graph,
                          parentGraph: => PartitionedGraph,
                          private[partition] val vertexIdMap: mutable.Map[Identifier, Identifier],
                          private[partition] val edgeIdMap: mutable.Map[Identifier, Identifier],
-                         private[partition] val extVertexIdMap: mutable.Map[Identifier, Identifier],
+                          val extVertexIdMap: mutable.Map[Identifier, Identifier],
                          val id: Int) {
 
   lazy private[partition] val parent = parentGraph
@@ -247,8 +247,9 @@ class Partition private (private[this] val subGraph: Graph,
     case Some(external) =>
       val neighbours = external.getPartitionVertices(Direction.BOTH)
       val neighboursByLabel =
-        neighbours.groupBy[String](_.getLabel).mapValues(vItr => (vItr.filter(_.getProperty[Int]("__external") == this.id), vItr.size))
-      val introversion = calculateIntroversion(List(Seq(external)))(neighboursByLabel, 0.5F)
+        neighbours.groupBy[String](_.getLabel)
+      val internalNeighboursByLabel = neighboursByLabel.mapValues(vItr => (vItr.filter(_.getProperty[Int]("__external") == this.id), vItr.size))
+      val introversion = calculateIntroversion(List(Seq(external)))(internalNeighboursByLabel, 0.5F)
       //We're comparing the introversion lost in the old partition, to the introversion gained in the new.
       val gain = introversion._1
       if(gain > loss) {
@@ -276,14 +277,14 @@ class Partition private (private[this] val subGraph: Graph,
     newExternals.foreach { case (edge, direction) =>
       //addEdge should handle vertex copying and externalisation for us.
       val newEdge = if (direction == "Out") {
-        val inEdge = getExternalVertex(edge.in.getId).getOrElse(edge.in)
-        val newEdge = addEdge(newVertex, inEdge, edge.getLabel, Some((inEdge, offering)))
+        val (inV, ext)= getExternalVertex(edge.in.getId).map( (_, None) ).getOrElse( (edge.in, Some((edge.in, offering))) )
+        val newEdge = addEdge(newVertex, inV, edge.getLabel, ext)
         extVertexIdMap(newEdge.in.getId) = newEdge.in.wrapped.getId
         newEdge
       } else {
-        val outEdge = getExternalVertex(edge.out.getId).getOrElse(edge.out)
-        val newEdge = addEdge(outEdge, newVertex, edge.getLabel, Some((outEdge, offering)))
-        extVertexIdMap(outEdge.getId) = outEdge.wrapped.getId
+        val (outV, ext) = getExternalVertex(edge.out.getId).map( (_,None) ).getOrElse( (edge.out, Some((edge.out, offering))) )
+        val newEdge = addEdge(outV, newVertex, edge.getLabel, ext)
+        extVertexIdMap(newEdge.out.getId) = newEdge.out.wrapped.getId
         newEdge
       }
       ElementHelper.copyProperties(edge, newEdge)
@@ -449,11 +450,13 @@ class Partition private (private[this] val subGraph: Graph,
         val outVertex = if(v == out) {
           ElementHelper.copyProperties(out, newVertex)
           newVertex.setProperty("__external", i)
+          extVertexIdMap(newVertex.getProperty[Any]("__globalId")) = newVertex.getId
           newVertex
         } else { out }
         val inVertex = if(v == in) {
           ElementHelper.copyProperties(in, newVertex)
           newVertex.setProperty("__external", i)
+          extVertexIdMap(newVertex.getProperty[Any]("__globalId")) = newVertex.getId
           newVertex
         } else { in }
         this.subGraph.addEdge(null, PartitionVertex.unwrap(outVertex), PartitionVertex.unwrap(inVertex), label)
