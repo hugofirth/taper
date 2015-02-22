@@ -77,7 +77,7 @@ class PartitionSpec extends UnitSpec with DatabaseSpec {
   before {
     graph = new TinkerGraph()
     GraphHelper.copyGraph(originalGraph, graph)
-    partitionedGraph = PartitionedGraph(graph, HashPartitionStrategy("output.directory" -> "ps_tinker"), 2, summary)
+    partitionedGraph = PartitionedGraph(graph, HashPartitionStrategy(Map("output.directory" -> "ps_tinker")), 2, summary)
     partition = partitionedGraph.getPartitions.headOption.getOrElse( fail("No partitions found") )
   }
 

@@ -15,18 +15,16 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental.graph
-
-import org.gdget.experimental.graph.util.Labellable
+package org.gdget.util
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class Path private (path: Seq[Labellable]) {
-  def toLabels: Seq[String] = path.map(_.getLabel)
-}
+trait Countable {
 
-object Path {
-  implicit def seqToPath(path: Seq[Labellable]):Path = new Path(path)
+  private var counter: Long = 0L
+  def getCount: Long = counter
+  def count(): Long = {counter += 1; counter}
+
 }

@@ -24,7 +24,7 @@ import java.lang.{Iterable => JIterable}
 import com.tinkerpop.blueprints._
 import com.tinkerpop.blueprints.util.{DefaultGraphQuery, ExceptionFactory}
 import org.gdget.experimental.graph.TraversalPatternSummary
-import org.gdget.util.{Counting, Identifier}
+import org.gdget.util.{Countable, Identifier}
 
 import scala.collection.JavaConverters._
 
@@ -82,7 +82,7 @@ object PartitionedGraph {
     * @return The created PartitionedGraph object
     */
   def apply(graph: Graph,
-            strategy: PartitionStrategy,
+            strategy: (Graph, Int, PartitionedGraph) => PartitionStrategy,
             numPartitions: Int,
             trie: TraversalPatternSummary,
             distributed: Boolean = false) = {
@@ -92,8 +92,8 @@ object PartitionedGraph {
       //Get the list of subgraphs and create partitions out of them
       var partitions: Map[Int, Partition] = Map()
       var initialId = 0L
-      val partitionedGraph = new LocalPartitionedGraph(graph, partitions, trie, initialId) with Counting
-      val partitionComponents = strategy.execute(graph, numPartitions, partitionedGraph)
+      val partitionedGraph = new LocalPartitionedGraph(graph, partitions, trie, initialId) with Countable
+      val partitionComponents = strategy(graph, numPartitions, partitionedGraph).execute()
       //Add Partitions to a map Int => Partition
       partitions = partitionComponents._1
       initialId = partitionComponents._2

@@ -15,16 +15,15 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.util
+package org.gdget.experimental.graph.util.io
+
+
+import com.tinkerpop.blueprints.Graph
 
 /** Description of Class
   *
   * @author hugofirth
   */
-trait Counting {
-
-  private var counter: Long = 0L
-  def getCount: Long = counter
-  def count(): Long = {counter += 1; counter}
-
+trait GraphWriter {
+  def write(graph: Graph, path: String): Unit
 }

@@ -21,16 +21,12 @@ import java.lang.{Iterable => JIterable}
 import java.util.{Set => JSet}
 
 import com.tinkerpop.blueprints.util.DefaultVertexQuery
-import org.gdget.util.{Counting, Identifier}
+import org.gdget.experimental.graph.util.Labellable
+import org.gdget.util.{Countable, Identifier}
 
-import scala.collection.IterableView
 import scala.collection.JavaConverters._
 
 import com.tinkerpop.blueprints._
-
-sealed trait Labellable { this: PartitionVertex =>
-  def getLabel: String = { this.getProperty[String]("__label") }
-}
 
 sealed trait Internal extends PartitionVertex {}
 
@@ -52,7 +48,7 @@ sealed trait External extends PartitionVertex {
   }
 
   def logTraversal() = this.partition.parent match {
-    case graph : Counting => graph.count()
+    case graph : Countable => graph.count()
     case _ =>
   }
 }
@@ -69,9 +65,6 @@ object PartitionVertex {
     case _ => v
   }
 }
-
-
-
 
 /** Description of Class
   *

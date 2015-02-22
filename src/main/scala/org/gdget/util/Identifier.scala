@@ -42,7 +42,8 @@ class Identifier private (val id: Long) extends Ordered[Identifier] {
 }
 
 object Identifier {
-  def apply(o: Any): Identifier = any2Id(o)
+  def apply(id: Long) = new Identifier(id)
+  def apply(id: Any): Identifier = any2Id(id)
   implicit def int2Id(i: Int): Identifier = new Identifier(i)
   implicit def long2Id(l: Long): Identifier = new Identifier(l)
   implicit def id2Long(id: Identifier): Long = id.id

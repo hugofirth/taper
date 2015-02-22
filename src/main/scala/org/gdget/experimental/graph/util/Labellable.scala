@@ -15,25 +15,14 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.util.collection
+package org.gdget.experimental.graph.util
 
-import scala.collection.immutable
+import com.tinkerpop.blueprints.Vertex
 
 /** Description of Class
   *
   * @author hugofirth
   */
-class PatternTrieMap[A,B](kv:(Seq[A],B)*) extends Map[Seq[A],B] with immutable.MapLike[Seq[A],B, PatternTrieMap[A, B]] {
-
-  val suffixes: Map[A, PatternTrieMap[A, B]] = Map.empty
-
-  override def +[C >: B](kv: (Seq[A], C)): Map[Seq[A], C] = ???
-
-  override def get(key: Seq[A]): Option[B] = ???
-
-  override def iterator: Iterator[(Seq[A], B)] = ???
-
-  override def -(key: Seq[A]): PatternTrieMap[A, B] = ???
-
-  override def empty = new PatternTrieMap[A,B]
+trait Labellable { this: Vertex =>
+  def getLabel: String = this.getProperty[String]("__label")
 }

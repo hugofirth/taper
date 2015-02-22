@@ -17,7 +17,7 @@
   */
 package org.gdget.experimental.graph
 
-import org.gdget.util.collection.{MutableTrieMultiMap, MutableTrieMap}
+import org.gdget.collection.{MutableTrieMultiMap, MutableTrieMap}
 
 import scala.collection.mutable
 
