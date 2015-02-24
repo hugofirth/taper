@@ -236,3 +236,8 @@ case class METISPartitionStrategy(override val graph: Graph,
   }
 }
 
+object METISPartitionStrategy {
+  def apply(props: Map[String, String], planURI: String): (Graph, Int, PartitionedGraph) => PartitionStrategy =
+    METISPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, planURI)
+}
+
