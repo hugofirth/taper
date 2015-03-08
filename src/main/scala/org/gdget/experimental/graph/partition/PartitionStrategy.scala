@@ -17,9 +17,9 @@
   */
 package org.gdget.experimental.graph.partition
 
-import java.io.FileNotFoundException
+import java.io.{InputStream, FileNotFoundException}
 
-import com.tinkerpop.blueprints.impls.neo4j2.Neo4j2Graph
+import com.tinkerpop.blueprints.impls.neo4j2.{Neo4j2Vertex, Neo4j2Graph}
 import com.tinkerpop.blueprints.impls.tg.TinkerGraph
 import com.tinkerpop.blueprints.util.{ExceptionFactory, ElementHelper}
 import com.tinkerpop.blueprints.{Edge, Vertex, Direction, Graph}
@@ -33,19 +33,21 @@ import scala.util.Try
 
 /** Defines the contract for a partition strategy object
   *
-  * TODO: Clean up this whole class. Its a horrible mess
+  * TODO: Clean up this whole class. Its a horrible mess. Please don't judge ;)
   *
   * @author hugofirth
   */
 sealed trait PartitionStrategy {
 
-
   def graph: Graph
   def numPartitions: Int
   def parent: PartitionedGraph
   def props: Map[String, String]
+  def label: Option[(Vertex) => String]
 
-  def labelOf: (Vertex) => String = (v: Vertex) =>
+
+  protected def labelOf = label.getOrElse(defaultLabelOf)
+  protected def defaultLabelOf: (Vertex) => String = (v: Vertex) =>
     properties("vertex.labelKey").flatMap({ labelKey => Option(v.getProperty[String](labelKey))}).getOrElse("NA")
 
   protected val subGraphs = for(i <- 0 until numPartitions ) yield createEmptySubGraph(graph)
@@ -100,7 +102,7 @@ sealed trait PartitionStrategy {
     newVertex.setProperty("__label", labelOf(vertex))
   }
 
-  protected def createEdge(e: Edge) {
+  protected def createEdge(e: Edge ) {
     //Work out which sub graph outgoing vertex is in and add edge to that
     val globalOutVertexId = e.getVertex(Direction.OUT).getId
     val globalInVertexId = e.getVertex(Direction.IN).getId
@@ -154,7 +156,6 @@ sealed trait PartitionStrategy {
   def execute(): (Map[Int, Partition], Identifier)
 }
 
-
 /** The PartitionStrategy class for creating a simple, "Hash-based", graph partition.
   *
   * @author hugofirth
@@ -162,7 +163,8 @@ sealed trait PartitionStrategy {
 case class HashPartitionStrategy(override val graph: Graph,
                                  override val numPartitions: Int,
                                  override val parent: PartitionedGraph,
-                                 override val props: Map[String, String]) extends PartitionStrategy {
+                                 override val props: Map[String, String],
+                                 override val label: Option[(Vertex) => String] = None) extends PartitionStrategy {
 
 
   /** Simplistic early implementation of Hash partitioning algorithm. Relies upon all sub graphs fitting into memory.
@@ -181,6 +183,10 @@ case class HashPartitionStrategy(override val graph: Graph,
 }
 
 object HashPartitionStrategy {
+  def apply(props: Map[String, String],
+            label: Option[(Vertex) => String]): (Graph, Int, PartitionedGraph) => PartitionStrategy =
+    HashPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, label)
+
   def apply(props: Map[String, String]): (Graph, Int, PartitionedGraph) => PartitionStrategy =
     HashPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props)
 }
@@ -190,10 +196,11 @@ object HashPartitionStrategy {
   *
   * @author hugofirth
   */
-case class SpectralPartitionStrategy(graph: Graph,
-                                     numPartitions: Int,
-                                     parent: PartitionedGraph,
-                                     props: Map[String, String]) extends PartitionStrategy {
+case class SpectralPartitionStrategy(override val graph: Graph,
+                                     override val numPartitions: Int,
+                                     override val parent: PartitionedGraph,
+                                     override val props: Map[String, String],
+                                     override val label: Option[(Vertex) => String] = None) extends PartitionStrategy {
 
   override def execute(): (Map[Int, Partition], Identifier) = ???
 }
@@ -201,17 +208,20 @@ case class SpectralPartitionStrategy(graph: Graph,
 /** The PartitionStrategy class for creating a graph partition with minimal ''edge-cut'' by using an external
   * partitioning plan generated using the popular tool METIS: http://glaros.dtc.umn.edu/gkhome/metis/metis/download
   *
+  * TODO: Fix to accept String again.
+  *
   * @author hugofirth
   */
 case class METISPartitionStrategy(override val graph: Graph,
                                   override val numPartitions: Int,
                                   override val parent: PartitionedGraph,
                                   override val props: Map[String, String],
-                                  planURI: String) extends PartitionStrategy {
+                                  planURI: InputStream,
+                                  override val label: Option[(Vertex) => String] = None) extends PartitionStrategy {
 
   override def execute(): (Map[Int, Partition], Identifier) = {
 
-    val buffer = Try(Source.fromFile(planURI)) recover {
+    val buffer = Try(Source.fromInputStream(planURI)) recover {
       case e: FileNotFoundException =>
         Console.err.println("[ERROR]: Specified file ("+planURI+") does not exist!")
         Console.err.println(e.getMessage)
@@ -222,22 +232,35 @@ case class METISPartitionStrategy(override val graph: Graph,
         Source.fromIterable(Iterable.empty[Char])
     }
 
+    val contigIdToVertexMap = {
+      val vertices = mutable.PriorityQueue[Vertex]()(Ordering.by[Vertex, Identifier](v => v.getId).reverse)
+      graph.getVertices.asScala.foreach(vertices.enqueue(_))
+      (Iterator from 0).zip(vertices.dequeueAll.iterator).toMap
+    }
+
     val mappings = for {
       (line, idx) <- buffer.get.getLines().zipWithIndex
       subGraphIdx = line.toInt if subGraphs.isDefinedAt(line.toInt)
-      vertex = Option(graph.getVertex(idx)) if vertex.isDefined
+      vertex = contigIdToVertexMap.get(idx) if vertex.isDefined
     } yield vertex.get -> subGraphIdx
 
     mappings.foreach { case (vertex, subGraphIdx) => createVertex(subGraphIdx, vertex) }
-    graph.getEdges.asScala.foreach(createEdge)
 
+    graph.getEdges.asScala.foreach(createEdge)
     buffer.get.close()
     partitions
   }
 }
 
 object METISPartitionStrategy {
-  def apply(props: Map[String, String], planURI: String): (Graph, Int, PartitionedGraph) => PartitionStrategy =
+
+  def apply(props: Map[String, String],
+            planURI: InputStream,
+            label: Option[(Vertex) => String]): (Graph, Int, PartitionedGraph) => PartitionStrategy =
+    METISPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, planURI, label)
+
+  def apply(props: Map[String, String],
+            planURI: InputStream): (Graph, Int, PartitionedGraph) => PartitionStrategy =
     METISPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, planURI)
 }
 

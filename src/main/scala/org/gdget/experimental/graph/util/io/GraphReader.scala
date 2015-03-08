@@ -15,21 +15,14 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental
+package org.gdget.experimental.graph.util.io
 
-import com.tinkerpop.blueprints.impls.neo4j2.Neo4j2Graph
-import org.gdget.experimental.graph.partition.PartitionedGraph
-
-import org.gdget.experimental.graph.util.io.{METISNeo4jGraphWriter}
+import com.tinkerpop.blueprints.Graph
 
 /** Description of Class
   *
   * @author hugofirth
   */
-object ProvGenMetisExport extends App {
-
-  val neoGraph = new Neo4j2Graph("/Users/hugofirth/Desktop/provgen/graph.db")
-
-  val partitionedGraph = PartitionedGraph()
-
+trait GraphReader {
+  def read(graph: Graph, path: String): Graph
 }

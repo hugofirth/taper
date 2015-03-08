@@ -76,8 +76,6 @@ class PartitionVertex private (val wrapped: Vertex, val globalId: Identifier, va
   //Set globalId property to provided value - convert to Long because some Graph vendors limit property types
   wrapped.setProperty("__globalId", globalId.toLong)
 
-
-
   override def getEdges(direction: Direction, labels: String*): JIterable[Edge] = {
     val edgesView: Iterable[Edge]= wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>
       PartitionEdge(e, e.getProperty[Any]("__globalId"), partition)
@@ -98,24 +96,24 @@ class PartitionVertex private (val wrapped: Vertex, val globalId: Identifier, va
 
   override def query(): VertexQuery = new DefaultVertexQuery(this)
 
-  private def getVerticesView(direction: Direction, labels: String*): Iterable[PartitionVertex] =
+  private def verticesView(direction: Direction, labels: String*): Iterable[PartitionVertex] =
     wrapped.getVertices(direction, labels: _*).asScala.view.map { v => PartitionVertex(v, v.getProperty[Any]("__globalId"), partition) }
 
   override def getVertices(direction: Direction, labels: String*): JIterable[Vertex] = {
-    val verticesView: Iterable[Vertex] = getVerticesView(direction, labels: _*)
-    verticesView.asJava
+    val vertices: Iterable[Vertex] = verticesView(direction, labels: _*)
+    vertices.asJava
   }
 
-  private[partition] def getPartitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] = {
+  def partitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] = {
     getVertices(direction, labels:_*).asScala.map( _.asInstanceOf[PartitionVertex] )
   }
 
-  private[partition] def getInternalVertices(direction: Direction, labels: String*): Iterable[Internal] = {
-    getVerticesView(direction, labels:_*).collect { case i: Internal => i }
+  private[partition] def intVertices(direction: Direction, labels: String*): Iterable[Internal] = {
+    verticesView(direction, labels:_*).collect { case i: Internal => i }
   }
 
-  private[partition] def getExternalVertices(direction: Direction, labels: String*): Iterable[External] = {
-    getVerticesView(direction, labels:_*).collect { case e: External => e }
+  private[partition] def extVertices(direction: Direction, labels: String*): Iterable[External] = {
+    verticesView(direction, labels:_*).collect { case e: External => e }
   }
 
   override def getProperty[T](propertyKey: String): T = wrapped.getProperty[T](propertyKey)

@@ -87,22 +87,23 @@ class PartitionSpec extends UnitSpec with DatabaseSpec {
   }
 
   "A Partition" should "be able to return a priority Queue of 'extraverted' vertices to eject" in {
-    val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.75F)
+    val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntro = 0.75F)
     pq should have size 1
-    pq.dequeue()._1.getId should equal (Identifier(1L))
+    pq.dequeue()._1 should equal (Identifier(1L))
   }
 
   it should "be able to return variable length priority Queues depending on provided parameters" in {
-    val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.5F)
+    val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntro = 0.5F)
     pq should have size 0
   }
 
   it should "be able to succesfully attempt a swap of an extraverted vertex with another partition" in {
-    val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntroversion = 0.75F)
-    val (vertex, introversion, probability) = pq.dequeue()
+    val pq = partition.getPotentialOutcastVertices(minToBeIn = 0.001F, maxIntro = 0.75F)
+    val (vertexId, introversion, probability) = pq.dequeue()
+    val vertex = partition.getVertex(vertexId).getOrElse { fail("Partition should contain potential ejection candidate.") }
     val destinations = partition.getPotentialDestPartitions(vertex)
     partition.getInternalVertices should contain (vertex)
-    partition.attemptSwap(vertex, probability, destinations)
+    partition.attemptSwap(vertex, probability, destinations, 0.5F)
     partition.getInternalVertices should not contain (vertex)
   }
 

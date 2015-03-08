@@ -29,76 +29,72 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.collection.JavaConverters._
 
+//TODO: Reintroduce magic number in receiving calulcateIntroversion check (0.5) and see what effect it has.
+//TODO: Try higher introversions in general.
+//TODO: Find pathological case for METIS getting it wrong.
+
 sealed trait Refinable {
-  this: Partition =>
+  this: Partition with Dynamic =>
 
   private[partition] val visitorMatrix = MutableTrieMap[PartitionVertex, Float](Seq.empty[PartitionVertex] -> 1F)
-  private val minToBeInThreshold = 0.001F
-  private val maxIntroversionThreshold = 0.2F
+  private val probThreshold = 0.001F
+  private val introThreshold = 0.2F
   private lazy val patterns = parent.traversalSummary
   private val labelCounts = mutable.Map.empty[String, Int]
 
+  def refine(minProb: Float = probThreshold, maxIntro: Float = introThreshold) = {
+    val pq = getPotentialOutcastVertices(minProb, maxIntro)
+    pq.dequeueAll.map { case (vertexId, introversion, probability) =>
+      getVertex(vertexId) map { vertex =>
+        attemptSwap(vertex, probability, getPotentialDestPartitions(vertex), maxIntro)
+      }
+    }
+  }
+
   //TODO: Replace the following with proper akka code
-  //TODO: Check we're not returning "internal" vertices from external partitions?
-  //  In most cases this can be easily achieved by making sure that we only get non-external neighbours from internal
-  //  vertices. In this way external vertices will act as a "barrier" between partitions.
-  //  A better long term solution would be to insure true vertex-cut partitioning. Its semantically clearer than what
-  //  we have now.  I think we actually already have this and I am an idiot ... ='( long day
-  @tailrec
-  final def attemptSwap(potential: PartitionVertex, probability: Float, destinations: List[Partition]): Unit = destinations match {
-    case head :: tail if head.shouldAccept(potential, probability-getLikelihoodOfPath(Seq(potential))) =>
-      //Handle vertex having left
-      //Check if any external vertices that potential was connected to now have no Internal (to this partition!) neighbours
-      //If any exist, then they should be deleted.
-      val externalNeighbourSet = potential.getPartitionVertices(Direction.BOTH).collect({ case e: External => e }).toSet
-      val remove = for{
-        removable <- externalNeighbourSet
-        neighbours = removable.wrapped.getVertices(Direction.BOTH).asScala.toSet
-        internalNeighbours = neighbours.filter( n => Option(n.getProperty[Int]("__external")).isEmpty )
-        if internalNeighbours.size < 2
-      } yield { removable }
-      remove.foreach(this.removeExternalVertex)
-      potential.setProperty("__external", head.id)
-      vertexIdMap.remove(potential.getId)
-      extVertexIdMap(potential.getId) = potential.wrapped.getId
-    case head :: tail => attemptSwap(potential, probability, tail) //If partition doesn't want it then try next best bet
-    case Nil => println("Swap failed completely")
+  @tailrec private[partition] final def attemptSwap(potential: PartitionVertex,
+                                   prob: Float,
+                                   destinations: List[Partition],
+                                   maxIntro: Float): Unit = destinations match {
+    case head :: tail if head.shouldAccept(potential, prob-getLikelihoodOfPath(Seq(potential)), maxIntro) =>
+      getFamily(potential).foreach { v => send(v, head); head.receive(v) }
+    case head :: tail => attemptSwap(potential, prob, tail, maxIntro) //If partition doesn't want it then try next best bet
+    case Nil => //Swap failed entirely - should do some logging here.
   }
 
   def getPotentialDestPartitions(v: PartitionVertex): List[Partition] = {
     //Get vertex's neighbourhood of partitions
-    val neighbourhood = v.getPartitionVertices(Direction.BOTH).collect({ case e: External => e })
-      .groupBy( _.getProperty[Int]("__external") ).mapValues(_.size)
-    val preference: List[(Int,Int)] = neighbourhood.toList.sortBy({ case (partitionId, incidence) => - incidence })
+    val neighbourhood = v.extVertices(Direction.BOTH).groupBy( _.getProperty[Int]("__external") ).mapValues(_.size)
+    val preference: List[(Int,Int)] = neighbourhood.toList.sortBy({ case (partitionId, incidence) => -incidence })
     preference.flatMap { case (partitionId, incidence) => parent.getPartitionById(partitionId) }
   }
 
-  def getPotentialOutcastVertices(minToBeIn: Float = minToBeInThreshold,
-                                  maxIntroversion: Float = maxIntroversionThreshold): mutable.PriorityQueue[(PartitionVertex, Float, Float)] = {
+  private[partition] def getPotentialOutcastVertices(minToBeIn: Float = probThreshold,
+                                  maxIntro: Float = introThreshold): mutable.PriorityQueue[(Identifier, Float, Float)] = {
 
     //Reverse order by percentage, then by reverse likelihood to be in
-    val potential = mutable.PriorityQueue[(PartitionVertex, Float, Float)]()(
-      Ordering[(Float, Float)].on { case(vertex, introversion, probability) => (-introversion/probability, -probability) }
+    val potential = mutable.PriorityQueue[(Identifier, Float, Float)]()(
+      Ordering[(Float, Float)].on { case(vertexId, introversion, probability) => (-introversion/probability, -probability) }
     )
     potential ++= (for{
       v <- getInternalVertices
       //We want both Internal and External neighbours here!
-      neighbours = v.getPartitionVertices(Direction.BOTH)
+      neighbours = v.partitionVertices(Direction.BOTH)
       neighboursByLabel = neighbours.groupBy[String](_.getLabel).mapValues(vItr => (vItr.collect({ case i: Internal => i }), vItr.size))
-      introversion = calculateIntroversion(List(Seq(v)))(neighboursByLabel, maxIntroversion)
-      if introversion._1/introversion._2 < maxIntroversion
-    } yield { (v, introversion._1, introversion._2) })
+      introversion = calculateIntroversion(List(Seq(v)))(neighboursByLabel, maxIntro)
+      if introversion._1/introversion._2 < maxIntro
+    } yield { (v.getId, introversion._1, introversion._2) })
 
     //TODO: Work on Map Index of external vertices to enable "outside-in" heuristic
     //TODO: As we are dealing with a read-only graph, would threading be part of an answer here?
   }
 
-  @tailrec
-  private def calculateIntroversion(paths: List[Seq[PartitionVertex]],
+
+  @tailrec private def calculateIntroversion(paths: List[Seq[PartitionVertex]],
                                     introversion: Float = 0F,
                                     totalPathProbabilities: Float = 0F)
                                    (vNeighboursByLabel: Map[String, (Iterable[PartitionVertex], Int)],
-                                    maxIntroversion: Float = maxIntroversionThreshold): (Float, Float) = {
+                                    maxIntro: Float = introThreshold): (Float, Float) = {
     var newPaths = List.empty[Seq[PartitionVertex]]
     var totalIntroversion = introversion
     var totalProbability = totalPathProbabilities
@@ -124,51 +120,51 @@ sealed trait Refinable {
         totalIntroversion += transitionsFromPath.values.sum + remainder
         totalProbability += pathLikelihood
       }
-      //We want Internal Neighbours here?
+      //We want Internal Neighbours here
       //TODO: work out if want both Internal and External here instead
-      newPaths ++= { for(neighbour <- path.head.getPartitionVertices(Direction.BOTH).collect({case i: Internal => i}).toList) yield neighbour+:path }
+      newPaths ++= { for(neighbour <- path.head.intVertices(Direction.BOTH).toList) yield neighbour+:path }
     }
 
     //Check Introversion percentage threshold after the paths have reached a third of their total length.
     //This is non-optimal for two reasons 1) we might drop a vertex too early 2) we might do wasted calculations
     //On the lookout for a better solution
     val perIntro = if(totalProbability>0) { totalIntroversion/totalProbability } else { 0F }
-    if(newPaths.nonEmpty && (newPaths.head.size<=(patterns.pathLength+3)/3 && perIntro<maxIntroversion)) {
-      calculateIntroversion(newPaths, totalIntroversion, totalProbability)(vNeighboursByLabel, maxIntroversion)
+    if(newPaths.nonEmpty && (newPaths.head.size<=(patterns.pathLength+3)/3 && perIntro<maxIntro)) {
+      calculateIntroversion(newPaths, totalIntroversion, totalProbability)(vNeighboursByLabel, maxIntro)
     } else { (totalIntroversion, totalProbability) }
   }
 
-  private def getLikelihoodOfPath(path: Seq[PartitionVertex], minToBeIn: Float = minToBeInThreshold) = visitorMatrix.get(path).getOrElse {
-    @tailrec
-    def traverseLikelihood(mutual: Seq[PartitionVertex], subTrie: MutableTrieMap[PartitionVertex, Float],
-                           remaining: Seq[PartitionVertex]): Float = {
-      remaining match {
-        case head::tail if mutual.nonEmpty =>
-          //We want both Internal and External vertices here!
-          val neighbourLabels = mutual.last.getPartitionVertices(Direction.BOTH).groupBy( _.getLabel )
-          val labelLikelihoods = patterns.getLikelihoodsFromPattern(mutual.toLabels)
-          val nextLikelihood = {
-            subTrie.value.getOrElse(0F) * (labelLikelihoods(head.getLabel) / neighbourLabels(head.getLabel).size)
-          }
-          subTrie += (Seq(head) -> nextLikelihood)
-          if(nextLikelihood > minToBeIn) {
-            traverseLikelihood(mutual:+head, subTrie.withPrefix(Seq(head)), tail)
-          } else{ 0F }
-        case head::tail =>
-          val labelLikelihoods = patterns.getLikelihoodsFromPattern(mutual.toLabels)
-          //special casing the first step. Starting to think I shouldn't.
-          val nextLikelihood = {
-            subTrie.value.getOrElse(0F) * (labelLikelihoods(head.getProperty[String]("__label")) /
-              labelCounts.getOrElseUpdate(head.getLabel, getInternalVertices(head.getLabel).size))
-          }
-          subTrie += (Seq(head) -> nextLikelihood)
-          if(nextLikelihood > minToBeIn) {
-            traverseLikelihood(mutual:+head, subTrie.withPrefix(Seq(head)), tail)
-          } else{ 0F }
-        case Nil =>
-          subTrie.value.getOrElse(0F)
-      }
+  private def getLikelihoodOfPath(path: Seq[PartitionVertex], minToBeIn: Float = probThreshold) = visitorMatrix.get(path).getOrElse {
+
+    @tailrec def traverseLikelihood(mutual: Seq[PartitionVertex],
+                                    subTrie: MutableTrieMap[PartitionVertex, Float],
+                                    remaining: Seq[PartitionVertex]): Float = remaining match {
+      case head::tail if mutual.nonEmpty =>
+        //We want both Internal and External vertices here!
+        val neighbourLabels = mutual.last.partitionVertices(Direction.BOTH).groupBy( _.getLabel )
+        val labelLikelihoods = patterns.getLikelihoodsFromPattern(mutual.toLabels)
+        val nextLikelihood = {
+          subTrie.value.getOrElse(0F) * (labelLikelihoods.getOrElse(head.getLabel, 0F) / neighbourLabels(head.getLabel).size)
+        }
+        subTrie += (Seq(head) -> nextLikelihood)
+        if(nextLikelihood > minToBeIn) {
+          traverseLikelihood(mutual:+head, subTrie.withPrefix(Seq(head)), tail)
+        } else{ 0F }
+      case head::tail =>
+        val labelLikelihoods = patterns.getLikelihoodsFromPattern(Seq.empty[String])
+        //special casing the first step. Starting to think I shouldn't.
+        val nextLikelihood = {
+          subTrie.value.getOrElse(0F) * (labelLikelihoods.getOrElse(head.getLabel, 0F) /
+            labelCounts.getOrElseUpdate(head.getLabel, getInternalVertices(head.getLabel).size))
+        }
+        subTrie += (Seq(head) -> nextLikelihood)
+        if(nextLikelihood > minToBeIn) {
+          traverseLikelihood(mutual:+head, subTrie.withPrefix(Seq(head)), tail)
+        } else{ 0F }
+      case Nil =>
+        subTrie.value.getOrElse(0F)
     }
+
 
     //Find the maximal prefix in path which does exist in the visitorMatrix
     val maxMutualPrefix = visitorMatrix.maximumMutualPrefix(path)
@@ -177,92 +173,116 @@ sealed trait Refinable {
     //TODO: Work out if we are properly accounting for a minimum probability to be in a path here.
   }
 
-  private def likelihoodThroughNeighbour(v: PartitionVertex)(n: PartitionVertex): Float = {
-    val neighbours = v.getPartitionVertices(Direction.BOTH)
-    if(neighbours.exists( _ == n ) && patterns.contains((n+:Seq(v)).toLabels)) {
-      //get the probability of n->v
-      val probability = getLikelihoodOfPath(n+:Seq(v))
-
-      //if probability is greater than
-    }
-    //    if(neighbours.exists(_ == neighbour) && patterns.contains((path:+neighbour).toLabels)) {
-    //      var likelihood = 0F
-    //      likelihood += if(patterns.contains((path:+neighbour).map( _.getLabel ))) {
-    //        //Get the likelihood associated with path
-    //        val pathLikelihood = getLikelihoodOfPath(path)
-    //        //Get the likelihoods associated with each possible subsequent label (internal and external) in the pathLabels sequence
-    //        val labelLikelihoods = patterns.getLikelihoodsFromPattern(pathLabels)
-    //        val absentLabels = labelLikelihoods.keySet &~ vNeighboursByLabel.keySet
-    //        //Uniformly distribute the likelihood of each label across each of the neighbours of v (internal and external) with that label
-    //        //Then assign their appropriate share to internal labels.
-    //        val transitionsFromPath: Map[PartitionVertex, Float] = for {
-    //          (label, labelledVertices) <- vNeighboursByLabel
-    //          vIntNeighbour <- labelledVertices if Option(vIntNeighbour.getProperty[Int]("__external")).isEmpty
-    //          likelihood = labelLikelihoods.getOrElse(label, 0F) / labelledVertices.size
-    //          effectiveLikelihood = likelihood*pathLikelihood
-    //        } yield { (vIntNeighbour, effectiveLikelihood) }
-    //      }
-    //    } else { 0F }
-    ???
-  }
-
   //TODO: Add checking of internal neighbours of v to see if any of them come with us, work out how that will work.
   // At the moment this is kind of a flood fill approach, but what is the threshold and why?
   // This is really tricky - I have spent some time trying to think of a solution, will do more soon.
   private def getFamily(v: PartitionVertex): Set[PartitionVertex] = {
-    val internalNeighbours = v.getPartitionVertices(Direction.BOTH).collect({ case i: Internal => i })
-      .groupBy(_.getLabel)
-    val vLabel = v.getProperty[String]("__label")
-    val validLabels = internalNeighbours.keySet.filter { p => patterns.contains(Seq(p,vLabel)) }
-    // pass 0 up the line for each neighbour, up to path limit. As it accrues probability check if it passes threshold.
-    // If it does then it is part of the family. The first generation family is the input to the second generation.
-    ???
+
+    @tailrec def getCandidates(candidates: Set[PartitionVertex]): Set[PartitionVertex] = {
+      val newCandidates = candidates flatMap { candidate =>
+        val neighbours = candidate.intVertices(Direction.BOTH).filterNot(candidates.contains)
+        neighbours.filter { n =>
+          val (i, o) = n.intVertices(Direction.BOTH, candidate.getLabel).partition(candidates.contains)
+          i.size > o.size
+        }
+      }
+      if(newCandidates.nonEmpty) { getCandidates( candidates ++ newCandidates ) } else { candidates }
+    }
+
+//    @tailrec def likeLihoodThrough(paths: List[Seq[PartitionVertex]],
+//                                   probabilities: (Float, Float) = (0,0))
+//                                  (implicit candidates: Set[PartitionVertex]): Float = {
+//      var newPaths = List.empty[Seq[PartitionVertex]]
+//      var (pathProb, vProb) = probabilities
+//      for(path <- paths if path.size <= patterns.pathLength) {
+//        if(patterns.trie.contains(path.toLabels)) {
+//          vProb += getLikelihoodOfPath(path)
+//          pathProb += getLikelihoodOfPath(path.init)
+//        }
+//        newPaths ++= { for(neighbour <- path.head.intVertices(Direction.BOTH).toList) yield neighbour+:path }
+//      }
+//      if(newPaths.nonEmpty && pProportion < 0.5F) { likeLihoodThrough(paths, pProportion) } else { pProportion }
+//    }
+
+    //get candidate family members for v
+    var family = Set(v)
+    //TODO: Fix with proper getFamily
+    family = family ++ getCandidates(family)
+    //If a vertex only has neighbours already in family, then add it to family.
+    //TODO: Do better with some kind of closed loop detection (hard)
+    family ++ (family flatMap(_.intVertices(Direction.BOTH).filter(_.intVertices(Direction.BOTH).forall(family.contains))))
+
   }
 
-  //TODO: Calculate gain *after* we have updated neighbours (somehow) otherwise its always the same value.
-  def shouldAccept(potential: PartitionVertex, loss: Float): Boolean = getExternalVertex(potential.getId) match {
+  private def shouldAccept(potential: PartitionVertex, loss: Float, maxIntro: Float): Boolean = getExternalVertex(potential.getId) match {
     case Some(external) =>
-      val neighbours = external.getPartitionVertices(Direction.BOTH)
-      val neighboursByLabel =
-        neighbours.groupBy[String](_.getLabel)
-      val internalNeighboursByLabel = neighboursByLabel.mapValues(vItr => (vItr.filter(_.getProperty[Int]("__external") == this.id), vItr.size))
-      val introversion = calculateIntroversion(List(Seq(external)))(internalNeighboursByLabel, 0.5F)
+      val neighboursByLabel = external.partitionVertices(Direction.BOTH).groupBy[String](_.getLabel)
+      val internalNeighboursByLabel = neighboursByLabel.mapValues { vItr =>
+        (vItr.filter(_.getProperty[Int]("__external") == id), vItr.size)
+      }
+      val introversion = calculateIntroversion(List(Seq(external)))(internalNeighboursByLabel, maxIntro)
       //We're comparing the introversion lost in the old partition, to the introversion gained in the new.
-      val gain = introversion._1
-      if(gain > loss) {
-        val newV = receive(potential)
-        println("Swap succeeded for vertex "+ potential+", from partition "+potential.partition.id+" to partition " +
-          this.id+". Vertex is now "+newV)
-        true
-      } else { false }
+      introversion._1 > loss
     case _ => false
   }
 
-  private def receive(vertex: PartitionVertex): Option[PartitionVertex] = this.getExternalVertex(vertex.getId) map { external =>
-    //Remove the external property and re-wrap the vertex as Internal
-    val offering = external.removeProperty[Int]("__external")
-    val newVertex = PartitionVertex(PartitionVertex.unwrap(external), external.getId, this)
-    extVertexIdMap.remove(external.getId)
-    vertexIdMap(newVertex.getId) = newVertex.wrapped.getId
-    //Get neighbours of potential and do Set disjoint with neighbours of it's external counterpart.
-    //The resulting set are new "external" neighbours. Create them (with properties etc...)
-    val newExternals: Set[(PartitionEdge, String)] = (vertex.getPartitionEdges(Direction.OUT).toSet &~
-      newVertex.getPartitionEdges(Direction.OUT).toSet).map( (_, "Out") )  ++
-      (vertex.getPartitionEdges(Direction.IN).toSet &~
-        newVertex.getPartitionEdges(Direction.IN).toSet).map( (_, "In") )
+}
 
+sealed trait Dynamic {
+  this: Partition =>
+
+  private[partition] def send(vertex: PartitionVertex, destination: Partition): Unit = {
+
+    //Handle vertex having left
+    //Check if any external vertices that potential was connected to now have no Internal (to this partition!) neighbours
+    //If any exist, then they should be deleted.
+    vertex.partitionVertices(Direction.BOTH).partition(n => Option(n.getProperty[Int]("__external")).isEmpty) match {
+      case (Nil, Nil) => removeVertex(vertex)
+      case (Nil, externals) =>
+        removeVertex(vertex)
+        //If an external neighbour no longer has any neighbours here, delete it.
+        externals.filter(_.wrapped.getVertices(Direction.BOTH).asScala.isEmpty).foreach(removeExternalVertex)
+      case (internals, externals) =>
+        //If an external neighbour only has one neighbour here (vertex), delete it.
+        externals.filter(_.wrapped.getVertices(Direction.BOTH).asScala.toSet.size == 1).foreach { v =>
+          removeExternalVertex(v)
+        }
+        vertex.setProperty("__external", destination.id)
+        vertexIdMap.remove(vertex.getId)
+        extVertexIdMap(vertex.getId) = vertex.wrapped.getId
+    }
+  }
+
+  //TODO: Run through again to catch dup Id. Run again with if check for id swap, work out when vertex gets missed for cleanup.
+  private[partition] def receive(v: PartitionVertex): PartitionVertex = {
+    val (newVertex, newExternals) = getExternalVertex(v.getId) match {
+      case Some(external) =>
+        //Remove the external property and re-wrap the vertex as Internal
+        external.removeProperty[Int]("__external")
+        val ex = PartitionVertex(PartitionVertex.unwrap(external), external.getId, this)
+        extVertexIdMap.remove(external.getId)
+        vertexIdMap(ex.getId) = ex.wrapped.getId
+        //Get neighbours of potential and do Set disjoint with neighbours of it's external counterpart.
+        //The resulting set are new "external" neighbours. Create them (with properties etc...)
+        val out = (v.getPartitionEdges(Direction.OUT).toSet &~ external.getPartitionEdges(Direction.OUT).toSet).map((_, Direction.OUT))
+        val in = (v.getPartitionEdges(Direction.IN).toSet &~ external.getPartitionEdges(Direction.IN).toSet).map((_, Direction.IN))
+        (ex, in ++ out)
+      case None =>
+        val newV = addVertex(v)
+        newV.removeProperty[Int]("__external")
+        (newV , (v.getPartitionEdges(Direction.OUT).map((_, Direction.OUT)) ++
+          v.getPartitionEdges(Direction.IN).map((_, Direction.IN))).toSet )
+    }
+    //TODO: replace with implicit "from" param
+    val from = v.partition.id
     newExternals.foreach { case (edge, direction) =>
       //addEdge should handle vertex copying and externalisation for us.
-      val newEdge = if (direction == "Out") {
-        val (inV, ext)= getExternalVertex(edge.in.getId).map( (_, None) ).getOrElse( (edge.in, Some((edge.in, offering))) )
-        val newEdge = addEdge(newVertex, inV, edge.getLabel, ext)
-        extVertexIdMap(newEdge.in.getId) = newEdge.in.wrapped.getId
-        newEdge
+      val newEdge = if (direction == Direction.OUT) {
+        val (inV, ext) = getExternalVertex(edge.in.getId).map((_, None)).getOrElse((edge.in, Some((edge.in, from))))
+        addEdge(newVertex, inV, edge.getLabel, ext)
       } else {
-        val (outV, ext) = getExternalVertex(edge.out.getId).map( (_,None) ).getOrElse( (edge.out, Some((edge.out, offering))) )
-        val newEdge = addEdge(outV, newVertex, edge.getLabel, ext)
-        extVertexIdMap(newEdge.out.getId) = newEdge.out.wrapped.getId
-        newEdge
+        val (outV, ext) = getExternalVertex(edge.out.getId).map((_,None)).getOrElse((edge.out, Some((edge.out, from))))
+        addEdge(outV, newVertex, edge.getLabel, ext)
       }
       ElementHelper.copyProperties(edge, newEdge)
     }
@@ -293,7 +313,7 @@ class Partition private (private[this] val subGraph: Graph,
                          private[partition] val vertexIdMap: mutable.Map[Identifier, Identifier],
                          private[partition] val edgeIdMap: mutable.Map[Identifier, Identifier],
                          val extVertexIdMap: mutable.Map[Identifier, Identifier],
-                         val id: Int) extends Refinable {
+                         val id: Int) extends Dynamic with Refinable {
 
   lazy private[partition] val parent = parentGraph
 
@@ -402,7 +422,7 @@ class Partition private (private[this] val subGraph: Graph,
     * @return
     */
   def addVertex(vertex: PartitionVertex): PartitionVertex = {
-    if(vertexIdMap.get(vertex.getId).isDefined) { throw ExceptionFactory.vertexWithIdAlreadyExists() }
+    if(vertexIdMap.get(vertex.getId).isDefined) { throw ExceptionFactory.vertexWithIdAlreadyExists(vertex.getId) }
     val newVertex = this.subGraph.addVertex(null)
     ElementHelper.copyProperties(vertex, newVertex)
     vertexIdMap.put(vertex.getId, newVertex.getId)

@@ -35,9 +35,13 @@ import scala.util.Try
   * @author hugofirth
   */
 case object METISGraphWriter extends GraphWriter {
-  override def write(graph: Graph, path: String): Unit = {
 
-    val pq = mutable.PriorityQueue[Vertex]()(Ordering[Identifier].on { case vertex => vertex.getId })
+  implicit val vertexOrdering = Ordering.by[Vertex, Identifier](vertex => vertex.getId)
+
+  override def write(graph: Graph, path: String): Unit = {
+    def neighbours(v: Vertex) = v.getVertices(Direction.BOTH).asScala.map(_.getId)
+
+    val pq = mutable.PriorityQueue[Vertex]()(vertexOrdering.reverse)
     graph.getVertices.asScala.foreach(pq.enqueue(_))
 
     val out = Try(Option(new FileWriter(path))) recover {
@@ -53,10 +57,16 @@ case object METISGraphWriter extends GraphWriter {
 
     out.get match {
       case Some(output) =>
-        val pw = new PrintWriter(output)
-        pq.dequeueAll.foreach { v => pw.println(v.getVertices(Direction.OUT).asScala.map(_.getId).mkString(" ")) }
-        pw.close()
-      case None => println("UM hello?")
+        val writer = new PrintWriter(output)
+        //METIS requires that vertices be numbered from 1, not 0
+        val idMap = pq.clone().dequeueAll.iterator.map(_.getId).zip(Iterator from 1).toMap
+        val lines = pq.dequeueAll.map(neighbours(_).flatMap(idMap.get))
+        val numVertices = lines.size
+        val numRelationships = lines.foldLeft(0) { case (accum, n) => accum + n.size }
+        writer.println(numVertices+" "+(numRelationships/2))
+        lines.foreach( n => writer.println(n.mkString(" ")))
+        writer.close()
+      case None =>
     }
   }
 }
@@ -65,7 +75,7 @@ case object METISNeo4jGraphWriter extends GraphWriter {
 
   implicit val nodeOrdering = Ordering.by[Node, Identifier] { case vertex => -vertex.getId }
 
-  //TODO: Rewrite this method. Shoehorning the Try Monad in here is worse than normal try/catch. Look at loaner pattern.
+  //TODO: Rewrite this method. Look at loaner pattern.
   override def write(graph: Graph, path: String): Unit = {
     def neighbours(n: Node) = n.getRelationships(neoDirection.BOTH).asScala.map(_.getEndNode.getId)
 
@@ -76,6 +86,7 @@ case object METISNeo4jGraphWriter extends GraphWriter {
     try {
       GlobalGraphOperations.at(neoGraph).getAllNodes.asScala.foreach(pq.enqueue(_))
       val writer = new PrintWriter(path)
+      //METIS requires that vertices be numbered from 1, not 0
       val idMap = pq.clone().dequeueAll.iterator.map(_.getId).zip(Iterator from 1).toMap
       val lines = pq.dequeueAll.map(neighbours(_).flatMap(idMap.get))
       val numVertices = lines.size

@@ -22,8 +22,18 @@ package org.gdget.experimental
   *
   * @author hugofirth
   */
-object Main extends App {
+trait Experiment {
 
-  //GratefulDeadExperiment.run("")
-  ProvGenExperiment.run("")
+  //Make trait implement Runnable, then have final execute method return Future and tick over until done, returning
+  //Runtime info (like memory etc...) every 10 seconds. Also time it.
+
+  def run(output: String)
+
+  protected final def time[A](f: => A) = {
+    val s = System.nanoTime
+    val ret = f
+    println("time: "+(System.nanoTime-s)/1e6+"ms")
+    ret
+  }
+
 }
