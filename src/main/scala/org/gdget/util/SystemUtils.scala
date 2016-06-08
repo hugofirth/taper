@@ -15,25 +15,22 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental
-
-import com.typesafe.scalalogging.slf4j.LazyLogging
+package org.gdget.util
 
 /** Description of Class
   *
   * @author hugofirth
   */
-trait Experiment extends LazyLogging {
+object SystemUtils {
+  def heapStats: String = {
+    val mb = 1024*1024
 
-  //Make trait implement Runnable, then have final execute method return Future and tick over until done, returning
-  //Runtime info (like memory etc...) every 10 seconds. Also time it.
+    //Getting the runtime reference from system
+    val runtime = Runtime.getRuntime
 
-  def run(output: String): Unit
-
-  protected final def time[A](f: => A)= {
-    val s = System.nanoTime
-    ((System.nanoTime-s)/1e6, f)
+    "##### Heap utilization statistics #####" + sys.props("line.separator") + "Used Memory: " +
+      ((runtime.totalMemory() - runtime.freeMemory()) / mb) + "MB" + sys.props("line.separator") +
+      "Free Memory: "+ (runtime.freeMemory() / mb) + "MB" + sys.props("line.separator") + "Total Memory: " +
+      (runtime.totalMemory() / mb) + "MB" + sys.props("line.separator") + "Max Memory: " + (runtime.maxMemory() / mb) + "MB"
   }
-
-
 }

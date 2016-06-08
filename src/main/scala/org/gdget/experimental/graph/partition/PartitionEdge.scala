@@ -17,7 +17,7 @@
   */
 package org.gdget.experimental.graph.partition
 
-import com.tinkerpop.blueprints.{Vertex, Direction, Edge}
+import com.tinkerpop.blueprints.{Direction, Edge}
 import org.gdget.util.Identifier
 
 object PartitionEdge {
@@ -69,5 +69,11 @@ class PartitionEdge private(val wrapped: Edge, globalId: Identifier, val partiti
     case _ => false
   }
 
-  override def hashCode(): Int = this.getId.hashCode()
+  override def hashCode = this.getId.hashCode
+
+  override def toString = s"e[ ${sys.props("line.separator")} " +
+    s"\t $out ${sys.props("line.separator")} \t " +
+    s"\t --[$getLabel]--> ${sys.props("line.separator")} " +
+    s"\t $in | gId: $getId, lId: ${wrapped.getId} " +
+    "]"
 }

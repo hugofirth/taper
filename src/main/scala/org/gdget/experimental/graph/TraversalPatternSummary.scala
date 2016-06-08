@@ -25,10 +25,7 @@ import scala.collection.mutable
   *
   * @author hugofirth
   */
-class TraversalPatternSummary(queryFrequencies: Map[String, Int], maxPathLength: Int) {
-
-  type VertexLabel = String
-  type Query = String
+class TraversalPatternSummary(queryFrequencies: Map[Query, Int], maxPathLength: Int) {
 
   val trie = new MutableTrieMap[VertexLabel, mutable.Set[Query]] with MutableTrieMultiMap[VertexLabel, Query]
   val querySet = queryFrequencies.keySet
@@ -79,5 +76,5 @@ class TraversalPatternSummary(queryFrequencies: Map[String, Int], maxPathLength:
 }
 
 object TraversalPatternSummary {
-  def apply(queryFrequencies: Map[String, Int], maxPathLengh: Int) = new TraversalPatternSummary(queryFrequencies, maxPathLengh)
+  def apply(queryFrequencies: Map[Query, Int], maxPathLengh: Int) = new TraversalPatternSummary(queryFrequencies, maxPathLengh)
 }

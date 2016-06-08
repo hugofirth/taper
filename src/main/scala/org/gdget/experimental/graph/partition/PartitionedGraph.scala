@@ -21,16 +21,17 @@ package org.gdget.experimental.graph.partition
 import java.util.concurrent.atomic.AtomicLong
 import java.lang.{Iterable => JIterable}
 
-import com.tinkerpop.blueprints._
+import com.tinkerpop.blueprints.{Vertex, Edge, Features, GraphQuery, Graph => BlueprintsGraph}
 import com.tinkerpop.blueprints.util.{DefaultGraphQuery, ExceptionFactory}
 import org.gdget.experimental.graph.TraversalPatternSummary
 import org.gdget.util.{Countable, Identifier}
+
 
 import scala.collection.JavaConverters._
 
 
 
-sealed trait PartitionedGraph extends Graph {
+sealed trait PartitionedGraph extends BlueprintsGraph {
   /** Returns a list of all Partitions in the Graph.
     *
     * @return an `Iterable` containing [[org.gdget.experimental.graph.partition.Partition]] objects
@@ -81,8 +82,8 @@ object PartitionedGraph {
     * @param distributed a `Boolean` which represents whether the graph will be distributed across machines
     * @return The created PartitionedGraph object
     */
-  def apply(graph: Graph,
-            strategy: (Graph, Int, PartitionedGraph) => PartitionStrategy,
+  def apply(graph: BlueprintsGraph,
+            strategy: (BlueprintsGraph, Int, PartitionedGraph) => PartitionStrategy,
             numPartitions: Int,
             trie: TraversalPatternSummary,
             distributed: Boolean = false) = {
@@ -112,9 +113,9 @@ object PartitionedGraph {
   */
 //TODO: update ids to be globalId case class at top level (Int, Identifier)
 //TODO: update use of Pattern matching to resolve Options to a .map() call instead
-class LocalPartitionedGraph private[partition] (graph: Graph,
+class LocalPartitionedGraph private[partition] (graph: BlueprintsGraph,
                                      partitionMap: => Map[Int, Partition],
-                                     val traversalSummary: TraversalPatternSummary,
+                                     var traversalSummary: TraversalPatternSummary,
                                      initialId: => Long = 0) extends PartitionedGraph {
 
   private lazy val partitions = partitionMap
@@ -169,7 +170,7 @@ class LocalPartitionedGraph private[partition] (graph: Graph,
       //If vertex not found, throw Exception as per reference implementation
       throw ExceptionFactory.vertexWithIdDoesNotExist(vertex.getId)
     }
-    partitions.map( _.removeVertex(parVertex) )
+    partitions.foreach( _.removeVertex(parVertex) )
   }
 
   //TODO: Create a sensible and balanced approach for adding vertices to partitions
@@ -186,7 +187,7 @@ class LocalPartitionedGraph private[partition] (graph: Graph,
   override def removeEdge(edge: Edge): Unit = {
     //Unsafe Cast - here there be dragons
     val parEdge = edge.asInstanceOf[PartitionEdge]
-    this.getEdgePartitions(parEdge).map( _.removeEdge(parEdge) )
+    this.getEdgePartitions(parEdge).foreach( _.removeEdge(parEdge) )
   }
 
   override def query(): GraphQuery = new DefaultGraphQuery(this)

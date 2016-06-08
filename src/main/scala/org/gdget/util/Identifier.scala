@@ -36,7 +36,7 @@ class Identifier private (val id: Long) extends Ordered[Identifier] {
     case _ => false
   }
 
-  override def hashCode(): Int = this.id.hashCode()
+  override def hashCode: Int = this.id.hashCode
 
   override def compare(that: Identifier): Int = this.id compare that.id
 }

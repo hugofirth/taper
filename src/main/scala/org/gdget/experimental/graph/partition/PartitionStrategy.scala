@@ -19,17 +19,19 @@ package org.gdget.experimental.graph.partition
 
 import java.io.{InputStream, FileNotFoundException}
 
-import com.tinkerpop.blueprints.impls.neo4j2.{Neo4j2Vertex, Neo4j2Graph}
-import com.tinkerpop.blueprints.impls.tg.TinkerGraph
 import com.tinkerpop.blueprints.util.{ExceptionFactory, ElementHelper}
-import com.tinkerpop.blueprints.{Edge, Vertex, Direction, Graph}
-import org.gdget.experimental.graph.UnsupportedImplException
-import org.gdget.util.Identifier
+import com.tinkerpop.blueprints.{Edge, Vertex, Direction, Graph => BlueprintsGraph}
+import com.typesafe.scalalogging.slf4j.LazyLogging
+
+
+import org.gdget.experimental.graph.{Transaction, UnsupportedImplException}
+import org.gdget.util.{SystemUtils, Identifier}
+
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.io.Source
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /** Defines the contract for a partition strategy object
   *
@@ -37,14 +39,14 @@ import scala.util.Try
   *
   * @author hugofirth
   */
-sealed trait PartitionStrategy {
+sealed trait PartitionStrategy extends LazyLogging {
 
-  def graph: Graph
+  def graph: BlueprintsGraph
+  def subGraphFactory: (String) => BlueprintsGraph
   def numPartitions: Int
   def parent: PartitionedGraph
   def props: Map[String, String]
   def label: Option[(Vertex) => String]
-
 
   protected def labelOf = label.getOrElse(defaultLabelOf)
   protected def defaultLabelOf: (Vertex) => String = (v: Vertex) =>
@@ -70,7 +72,6 @@ sealed trait PartitionStrategy {
     (partitions.toMap, maxId)
   }
 
-
   private def properties(key: String): Option[String] = props.get(key).orElse(defaults.get(key))
 
   private def incrementAndGetSubGraphLocation(): String = {
@@ -79,12 +80,7 @@ sealed trait PartitionStrategy {
     properties("output.root").get+"/"+properties("output.directory").get+"/"+"graph-"+subGraphCounter
   }
 
-  //TODO: implement proper Neo4j support rather than just importing Neo4j to Tinker
-  private def createEmptySubGraph(graph: Graph): Graph = graph match {
-    case g: TinkerGraph => new TinkerGraph(incrementAndGetSubGraphLocation())
-    case g: Neo4j2Graph => new TinkerGraph(incrementAndGetSubGraphLocation()) //new Neo4j2Graph(getSubGraphLocation())
-    case g => throw new UnsupportedImplException(Some(graph.getClass.getSimpleName))
-  }
+  private def createEmptySubGraph(graph: BlueprintsGraph): BlueprintsGraph = subGraphFactory(incrementAndGetSubGraphLocation())
 
   protected def createExternalVertex(partitionIdx: Int, v: Vertex, ext: Int): Vertex = {
     val newVertex = subGraphs(partitionIdx).addVertex(null)
@@ -95,10 +91,11 @@ sealed trait PartitionStrategy {
 
   protected def createVertex(partitionIdx: Int, vertex: Vertex) {
     val newVertex = subGraphs(partitionIdx).addVertex(null)
-    maxId = if(maxId < vertex.getId) vertex.getId else maxId
-    vertexIdMaps(partitionIdx)(vertex.getId) = newVertex.getId
-    ElementHelper.copyProperties(vertex, newVertex)
-    newVertex.setProperty("__globalId", vertex.getId)
+    val vId = Identifier(vertex.getId)
+    maxId = if(maxId < vId) vId else maxId
+    vertexIdMaps(partitionIdx)(vId) = newVertex.getId
+    //ElementHelper.copyProperties(vertex, newVertex)
+    newVertex.setProperty("__globalId", vId.toLong)
     newVertex.setProperty("__label", labelOf(vertex))
   }
 
@@ -113,14 +110,16 @@ sealed trait PartitionStrategy {
     val localOutVertexId = vertexIdMaps(outSubGraphIdx)(globalOutVertexId)
     val localInVertexId = vertexIdMaps(inSubGraphIdx)(globalInVertexId)
 
+    val eId = Identifier(e.getId)
+
     if(outSubGraphIdx == inSubGraphIdx) {
       //Lookup vertex ids local to their containing subgraphs
       val subGraph = subGraphs(outSubGraphIdx)
       val newEdge = subGraph.addEdge(null, subGraph.getVertex(localOutVertexId), subGraph.getVertex(localInVertexId), e.getLabel)
-      maxId = if(maxId < e.getId) e.getId else maxId
-      edgeIdMaps(outSubGraphIdx)(e.getId) = newEdge.getId
-      newEdge.setProperty("__globalId", e.getId)
-      ElementHelper.copyProperties(e, newEdge)
+      maxId = if(maxId < eId) eId else maxId
+      edgeIdMaps(outSubGraphIdx)(eId) = newEdge.getId
+      newEdge.setProperty("__globalId", eId.toLong)
+      //ElementHelper.copyProperties(e, newEdge)
     } else {
       //If edge is cross partition create 2 edges and an external vertex
       val outSubGraph = subGraphs(outSubGraphIdx)
@@ -143,13 +142,13 @@ sealed trait PartitionStrategy {
       }
       val newOutEdge = outSubGraph.addEdge(null, outSubGraph.getVertex(localOutVertexId), extInVertex, e.getLabel)
       val newInEdge = inSubGraph.addEdge(null, extOutVertex, inSubGraph.getVertex(localInVertexId), e.getLabel)
-      maxId = if(maxId < e.getId) e.getId else maxId
-      edgeIdMaps(outSubGraphIdx)(e.getId) = newOutEdge.getId
-      edgeIdMaps(inSubGraphIdx)(e.getId) = newInEdge.getId
-      ElementHelper.copyProperties(e, newOutEdge)
-      ElementHelper.copyProperties(e, newInEdge)
-      newInEdge.setProperty("__globalId", e.getId)
-      newOutEdge.setProperty("__globalId", e.getId)
+      maxId = if(maxId < eId) eId else maxId
+      edgeIdMaps(outSubGraphIdx)(eId) = newOutEdge.getId
+      edgeIdMaps(inSubGraphIdx)(eId) = newInEdge.getId
+//      ElementHelper.copyProperties(e, newOutEdge)
+//      ElementHelper.copyProperties(e, newInEdge)
+      newInEdge.setProperty("__globalId", eId.toLong)
+      newOutEdge.setProperty("__globalId", eId.toLong)
     }
   }
 
@@ -160,7 +159,8 @@ sealed trait PartitionStrategy {
   *
   * @author hugofirth
   */
-case class HashPartitionStrategy(override val graph: Graph,
+case class HashPartitionStrategy(override val graph: BlueprintsGraph,
+                                 override val subGraphFactory: (String) => BlueprintsGraph,
                                  override val numPartitions: Int,
                                  override val parent: PartitionedGraph,
                                  override val props: Map[String, String],
@@ -174,21 +174,49 @@ case class HashPartitionStrategy(override val graph: Graph,
   //TODO: Adapt the partition to periodically persist the partitions to free up memory?
   //TODO: Adapt to produce min ID count for each partition and pass it on during construction
   override def execute(): (Map[Int, Partition], Identifier) = {
+    def createElements() = {
+      val partitionKeys = Iterator.continually((0 until numPartitions).toIterator).flatten
+      //graph.getVertices.asScala.foreach(createVertex(partitionKeys.next(), _))
+      for((vertex, id) <- graph.getVertices.asScala.zipWithIndex) {
+        createVertex(partitionKeys.next(), vertex)
+        if(id%10000 == 0)
+          logger.debug(s"Created $id vertices.")
+          if(id%1000000 == 0)
+            logger.debug(SystemUtils.heapStats)
+      }
+      //graph.getEdges.asScala.foreach(createEdge)
+      for((edge, id) <- graph.getEdges.asScala.zipWithIndex) {
+        createEdge(edge)
+        if(id%10000 == 0)
+          logger.debug(s"Created $id edges.")
+          if(id%1000000 == 0)
+            logger.debug(SystemUtils.heapStats)
+      }
+    }
 
-    val partitionKeys = Iterator.continually((0 until numPartitions).toIterator).flatten
-    graph.getVertices.asScala.foreach(createVertex(partitionKeys.next(), _))
-    graph.getEdges.asScala.foreach(createEdge)
+    val tx = Transaction.forGraph(graph)
+
+    Try(createElements()) match {
+      case Success(_) => tx.foreach(_.commit())
+      case Failure(e) =>
+        logger.error("[ERROR]: An unexpected error occurred when trying to Hash partition the graph!")
+        logger.error(e.toString)
+        tx.foreach(_.rollback())
+    }
+
     partitions
   }
 }
 
 object HashPartitionStrategy {
-  def apply(props: Map[String, String],
-            label: Option[(Vertex) => String]): (Graph, Int, PartitionedGraph) => PartitionStrategy =
-    HashPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, label)
+  def apply(subGraphFactory: (String) => BlueprintsGraph,
+            props: Map[String, String],
+            label: Option[(Vertex) => String]): (BlueprintsGraph, Int, PartitionedGraph) => PartitionStrategy =
+    HashPartitionStrategy(_: BlueprintsGraph, subGraphFactory, _: Int, _: PartitionedGraph, props, label)
 
-  def apply(props: Map[String, String]): (Graph, Int, PartitionedGraph) => PartitionStrategy =
-    HashPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props)
+  def apply(subGraphFactory: (String) => BlueprintsGraph,
+            props: Map[String, String]): (BlueprintsGraph, Int, PartitionedGraph) => PartitionStrategy =
+    HashPartitionStrategy(_: BlueprintsGraph, subGraphFactory, _: Int, _: PartitionedGraph, props)
 }
 
 /** The PartitionStrategy class for creating a graph partition which minimises ''edge-cut'' using spectral graph
@@ -196,7 +224,8 @@ object HashPartitionStrategy {
   *
   * @author hugofirth
   */
-case class SpectralPartitionStrategy(override val graph: Graph,
+case class SpectralPartitionStrategy(override val graph: BlueprintsGraph,
+                                     override val subGraphFactory: (String) => BlueprintsGraph,
                                      override val numPartitions: Int,
                                      override val parent: PartitionedGraph,
                                      override val props: Map[String, String],
@@ -208,11 +237,12 @@ case class SpectralPartitionStrategy(override val graph: Graph,
 /** The PartitionStrategy class for creating a graph partition with minimal ''edge-cut'' by using an external
   * partitioning plan generated using the popular tool METIS: http://glaros.dtc.umn.edu/gkhome/metis/metis/download
   *
-  * TODO: Fix to accept String again.
+  * TODO: Fix to accept String again. What did I mean by this?
   *
   * @author hugofirth
   */
-case class METISPartitionStrategy(override val graph: Graph,
+case class METISPartitionStrategy(override val graph: BlueprintsGraph,
+                                  override val subGraphFactory: (String) => BlueprintsGraph,
                                   override val numPartitions: Int,
                                   override val parent: PartitionedGraph,
                                   override val props: Map[String, String],
@@ -221,32 +251,57 @@ case class METISPartitionStrategy(override val graph: Graph,
 
   override def execute(): (Map[Int, Partition], Identifier) = {
 
+    def createElementsFrom(src: Source) = {
+      val partitionBuffers = for(i <- 0 until numPartitions) yield mutable.ListBuffer.empty[Vertex]
+
+      for {
+        (p, v) <- src.getLines()
+          .zip(graph.getVertices.asScala.iterator)
+        pId = p.toInt if subGraphs.isDefinedAt(p.toInt)
+      } partitionBuffers(pId) += v
+
+      logger.debug("Finished adding vertices to partition buckets.")
+      logger.debug(SystemUtils.heapStats)
+
+      var i = 0
+      for {
+        (vertices, idx) <- partitionBuffers.zipWithIndex
+        vertex <- vertices
+      } { createVertex(idx, vertex); i+=1; if(i%10000 == 0) logger.debug(s"Created $i vertices.") }
+
+      partitionBuffers.foreach(_.clear())
+      logger.debug("Finished creating partition vertices.")
+      logger.debug(SystemUtils.heapStats)
+
+      i = 0
+      for(edge <- graph.getEdges.asScala) { createEdge(edge); i+=1; if(i%10000 == 0) logger.debug(s"Created $i edges.") }
+      logger.debug("Finished creating partition edges.")
+    }
+
+    logger.debug("Starting to partition the graph")
+
     val buffer = Try(Source.fromInputStream(planURI)) recover {
       case e: FileNotFoundException =>
-        Console.err.println("[ERROR]: Specified file ("+planURI+") does not exist!")
-        Console.err.println(e.getMessage)
+        logger.error("[ERROR]: Specified file ("+planURI+") does not exist!")
+        logger.error(e.getMessage)
         Source.fromIterable(Iterable.empty[Char])
       case e: Exception =>
-        Console.err.println("[ERROR]: An unexpected error occurred when trying to read the file "+planURI)
-        Console.err.println(e.getMessage)
+        logger.error("[ERROR]: An unexpected error occurred when trying to read the file "+planURI)
+        logger.error(e.getMessage)
         Source.fromIterable(Iterable.empty[Char])
     }
 
-    val contigIdToVertexMap = {
-      val vertices = mutable.PriorityQueue[Vertex]()(Ordering.by[Vertex, Identifier](v => v.getId).reverse)
-      graph.getVertices.asScala.foreach(vertices.enqueue(_))
-      (Iterator from 0).zip(vertices.dequeueAll.iterator).toMap
+    val tx = Transaction.forGraph(graph)
+
+    Try(createElementsFrom(buffer.get)) match {
+      case Success(_) => tx.foreach(_.commit())
+      case Failure(e) =>
+        Console.err.println("[ERROR]: An unexpected error occurred when trying to METIS partition the graph!")
+        Console.err.println(e.getMessage)
+        tx.foreach(_.rollback())
+        System.exit(1)
     }
 
-    val mappings = for {
-      (line, idx) <- buffer.get.getLines().zipWithIndex
-      subGraphIdx = line.toInt if subGraphs.isDefinedAt(line.toInt)
-      vertex = contigIdToVertexMap.get(idx) if vertex.isDefined
-    } yield vertex.get -> subGraphIdx
-
-    mappings.foreach { case (vertex, subGraphIdx) => createVertex(subGraphIdx, vertex) }
-
-    graph.getEdges.asScala.foreach(createEdge)
     buffer.get.close()
     partitions
   }
@@ -254,13 +309,14 @@ case class METISPartitionStrategy(override val graph: Graph,
 
 object METISPartitionStrategy {
 
-  def apply(props: Map[String, String],
+  def apply(subGraphFactory: (String) => BlueprintsGraph,
+            props: Map[String, String],
             planURI: InputStream,
-            label: Option[(Vertex) => String]): (Graph, Int, PartitionedGraph) => PartitionStrategy =
-    METISPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, planURI, label)
+            label: Option[(Vertex) => String]): (BlueprintsGraph, Int, PartitionedGraph) => PartitionStrategy =
+    METISPartitionStrategy(_: BlueprintsGraph, subGraphFactory, _: Int, _: PartitionedGraph, props, planURI, label)
 
-  def apply(props: Map[String, String],
-            planURI: InputStream): (Graph, Int, PartitionedGraph) => PartitionStrategy =
-    METISPartitionStrategy(_: Graph, _: Int, _: PartitionedGraph, props, planURI)
+  def apply(subGraphFactory: (String) => BlueprintsGraph,
+            props: Map[String, String],
+            planURI: InputStream): (BlueprintsGraph, Int, PartitionedGraph) => PartitionStrategy =
+    METISPartitionStrategy(_: BlueprintsGraph, subGraphFactory, _: Int, _: PartitionedGraph, props, planURI)
 }
-

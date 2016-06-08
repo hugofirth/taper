@@ -18,20 +18,21 @@
   */
 package org.gdget.experimental.graph.partition
 
+
 import com.tinkerpop.blueprints.util.{ExceptionFactory, ElementHelper}
-import com.tinkerpop.blueprints.{Direction, Graph}
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph, _}
 import org.gdget.experimental.graph.EdgeWithIdDoesNotExistException
 import org.gdget.experimental.graph.Path._
-import org.gdget.util.Identifier
+import org.gdget.util.{Countable, Identifier}
 import org.gdget.collection.MutableTrieMap
 
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
 
-//TODO: Reintroduce magic number in receiving calulcateIntroversion check (0.5) and see what effect it has.
-//TODO: Try higher introversions in general.
 //TODO: Find pathological case for METIS getting it wrong.
+
 
 sealed trait Refinable {
   this: Partition with Dynamic =>
@@ -44,8 +45,8 @@ sealed trait Refinable {
 
   def refine(minProb: Float = probThreshold, maxIntro: Float = introThreshold) = {
     val pq = getPotentialOutcastVertices(minProb, maxIntro)
-    pq.dequeueAll.map { case (vertexId, introversion, probability) =>
-      getVertex(vertexId) map { vertex =>
+    pq.dequeueAll.foreach { case (vertexId, introversion, probability) =>
+      getVertex(vertexId) foreach { vertex =>
         attemptSwap(vertex, probability, getPotentialDestPartitions(vertex), maxIntro)
       }
     }
@@ -76,10 +77,12 @@ sealed trait Refinable {
     val potential = mutable.PriorityQueue[(Identifier, Float, Float)]()(
       Ordering[(Float, Float)].on { case(vertexId, introversion, probability) => (-introversion/probability, -probability) }
     )
+
     potential ++= (for{
-      v <- getInternalVertices
+      (v, i) <- getInternalVertices.zipWithIndex
       //We want both Internal and External neighbours here!
-      neighbours = v.partitionVertices(Direction.BOTH)
+      _ = if(i%10000==0) println(s"Have processed $i vertices in partition $id")
+      neighbours = v.getPartitionVertices(Direction.BOTH)
       neighboursByLabel = neighbours.groupBy[String](_.getLabel).mapValues(vItr => (vItr.collect({ case i: Internal => i }), vItr.size))
       introversion = calculateIntroversion(List(Seq(v)))(neighboursByLabel, maxIntro)
       if introversion._1/introversion._2 < maxIntro
@@ -90,6 +93,10 @@ sealed trait Refinable {
   }
 
 
+  //TODO: Add a lookup tree for the value prefixes of suffixes. This will slow the expansion of the recursive calculateIntroversion
+  // function as it works backwards through a graph from a vertex.
+
+  //TODO: Adopt sampling when exploring paths for super nodes
   @tailrec private def calculateIntroversion(paths: List[Seq[PartitionVertex]],
                                     introversion: Float = 0F,
                                     totalPathProbabilities: Float = 0F)
@@ -101,7 +108,7 @@ sealed trait Refinable {
     for(path <- paths if path.size <= patterns.pathLength) {
       //Get the path's label sequence
       val pathLabels = path.toLabels
-      //If patterns contains the label sequence and a prefix
+      //If patterns contains the label sequence as a prefix
       if(patterns.trie.contains(pathLabels)) {
         //Get the likelihood associated with path
         val pathLikelihood = getLikelihoodOfPath(path)
@@ -129,6 +136,7 @@ sealed trait Refinable {
     //This is non-optimal for two reasons 1) we might drop a vertex too early 2) we might do wasted calculations
     //On the lookout for a better solution
     val perIntro = if(totalProbability>0) { totalIntroversion/totalProbability } else { 0F }
+    //TODO: Should this not be newPaths <= .3*patterns.Length || perIntro<maxIntro?
     if(newPaths.nonEmpty && (newPaths.head.size<=(patterns.pathLength+3)/3 && perIntro<maxIntro)) {
       calculateIntroversion(newPaths, totalIntroversion, totalProbability)(vNeighboursByLabel, maxIntro)
     } else { (totalIntroversion, totalProbability) }
@@ -141,7 +149,7 @@ sealed trait Refinable {
                                     remaining: Seq[PartitionVertex]): Float = remaining match {
       case head::tail if mutual.nonEmpty =>
         //We want both Internal and External vertices here!
-        val neighbourLabels = mutual.last.partitionVertices(Direction.BOTH).groupBy( _.getLabel )
+        val neighbourLabels = mutual.last.getPartitionVertices(Direction.BOTH).groupBy( _.getLabel )
         val labelLikelihoods = patterns.getLikelihoodsFromPattern(mutual.toLabels)
         val nextLikelihood = {
           subTrie.value.getOrElse(0F) * (labelLikelihoods.getOrElse(head.getLabel, 0F) / neighbourLabels(head.getLabel).size)
@@ -216,7 +224,7 @@ sealed trait Refinable {
 
   private def shouldAccept(potential: PartitionVertex, loss: Float, maxIntro: Float): Boolean = getExternalVertex(potential.getId) match {
     case Some(external) =>
-      val neighboursByLabel = external.partitionVertices(Direction.BOTH).groupBy[String](_.getLabel)
+      val neighboursByLabel = external.getPartitionVertices(Direction.BOTH).groupBy[String](_.getLabel)
       val internalNeighboursByLabel = neighboursByLabel.mapValues { vItr =>
         (vItr.filter(_.getProperty[Int]("__external") == id), vItr.size)
       }
@@ -228,25 +236,47 @@ sealed trait Refinable {
 
 }
 
-sealed trait Dynamic {
+sealed trait Dynamic extends Countable {
   this: Partition =>
 
   private[partition] def send(vertex: PartitionVertex, destination: Partition): Unit = {
 
+    this.count()
+    if(this.getCount%1000==0){println(s"Running comm volume for partition $id is $getCount")}
+
+    //TODO: Check we're not sending External vertices
+    //TODO: Work out if the list of edges to delete in case (internals, externals) contains dups. If so, why?
+    //TODO: Check where else edges are being deleted, or failing to be added to the id map in the first place.
+
+    def seggregate(vertices: Iterable[PartitionVertex]) = {
+      val internalsBuffer = ListBuffer.empty[Internal]
+      val externalsBuffer = ListBuffer.empty[External]
+
+      vertices foreach {
+        case v: Internal => internalsBuffer += v
+        case v: External => externalsBuffer += v
+      }
+      (internalsBuffer.toList, externalsBuffer.toList)
+    }
+
     //Handle vertex having left
     //Check if any external vertices that potential was connected to now have no Internal (to this partition!) neighbours
     //If any exist, then they should be deleted.
-    vertex.partitionVertices(Direction.BOTH).partition(n => Option(n.getProperty[Int]("__external")).isEmpty) match {
+    seggregate(vertex.getPartitionVertices(Direction.BOTH)) match {
       case (Nil, Nil) => removeVertex(vertex)
       case (Nil, externals) =>
         removeVertex(vertex)
         //If an external neighbour no longer has any neighbours here, delete it.
-        externals.filter(_.wrapped.getVertices(Direction.BOTH).asScala.isEmpty).foreach(removeExternalVertex)
+        externals.toSet.filter(_.getLocalVertices.isEmpty).foreach(removeExternalVertex)
       case (internals, externals) =>
         //If an external neighbour only has one neighbour here (vertex), delete it.
-        externals.filter(_.wrapped.getVertices(Direction.BOTH).asScala.toSet.size == 1).foreach { v =>
-          removeExternalVertex(v)
-        }
+        for {
+          external <- externals
+          edge <- external.getLocalEdges
+          if edge.in == vertex || edge.out == vertex
+        } removeEdge(edge)
+
+        externals.toSet.filter(_.getLocalVertices.isEmpty).foreach(removeExternalVertex)
         vertex.setProperty("__external", destination.id)
         vertexIdMap.remove(vertex.getId)
         extVertexIdMap(vertex.getId) = vertex.wrapped.getId
@@ -261,6 +291,7 @@ sealed trait Dynamic {
         external.removeProperty[Int]("__external")
         val ex = PartitionVertex(PartitionVertex.unwrap(external), external.getId, this)
         extVertexIdMap.remove(external.getId)
+
         vertexIdMap(ex.getId) = ex.wrapped.getId
         //Get neighbours of potential and do Set disjoint with neighbours of it's external counterpart.
         //The resulting set are new "external" neighbours. Create them (with properties etc...)
@@ -275,16 +306,21 @@ sealed trait Dynamic {
     }
     //TODO: replace with implicit "from" param
     val from = v.partition.id
-    newExternals.foreach { case (edge, direction) =>
-      //addEdge should handle vertex copying and externalisation for us.
-      val newEdge = if (direction == Direction.OUT) {
-        val (inV, ext) = getExternalVertex(edge.in.getId).map((_, None)).getOrElse((edge.in, Some((edge.in, from))))
-        addEdge(newVertex, inV, edge.getLabel, ext)
-      } else {
-        val (outV, ext) = getExternalVertex(edge.out.getId).map((_,None)).getOrElse((edge.out, Some((edge.out, from))))
-        addEdge(outV, newVertex, edge.getLabel, ext)
-      }
-      ElementHelper.copyProperties(edge, newEdge)
+    newExternals foreach {
+      case (edge, direction) =>
+        val newEdge = direction match {
+          case Direction.OUT =>
+            val (inV, ext) = getExternalVertex(edge.in.getId) map { v => (v, None) } getOrElse
+              (edge.in, Some((edge.in, from)))
+            addEdge(newVertex, inV, edge.getLabel, ext, edge.getId)
+          case Direction.IN =>
+            val (outV, ext) = getExternalVertex(edge.out.getId) map {v => (v, None) } getOrElse
+              (edge.out, Some((edge.out, from)))
+            addEdge(outV, newVertex, edge.getLabel, ext, edge.getId)
+          case Direction.BOTH =>
+            throw ExceptionFactory.bothIsNotSupported()
+        }
+        ElementHelper.copyProperties(edge, newEdge)
     }
     newVertex
   }
@@ -293,7 +329,7 @@ sealed trait Dynamic {
 
 /** */
 object Partition {
-  def apply(subGraph: Graph,
+  def apply(subGraph: BlueprintsGraph,
             parent: => PartitionedGraph,
             vertexIdMap: mutable.Map[Identifier, Identifier],
             edgeIdMap: mutable.Map[Identifier, Identifier],
@@ -308,11 +344,11 @@ object Partition {
   *
   * @author hugofirth
   */
-class Partition private (private[this] val subGraph: Graph,
+class Partition private (private val subGraph: BlueprintsGraph,
                          parentGraph: => PartitionedGraph,
                          private[partition] val vertexIdMap: mutable.Map[Identifier, Identifier],
                          private[partition] val edgeIdMap: mutable.Map[Identifier, Identifier],
-                         val extVertexIdMap: mutable.Map[Identifier, Identifier],
+                         protected val extVertexIdMap: mutable.Map[Identifier, Identifier],
                          val id: Int) extends Dynamic with Refinable {
 
   lazy private[partition] val parent = parentGraph
@@ -328,7 +364,7 @@ class Partition private (private[this] val subGraph: Graph,
   def getVertex(globalId: Identifier): Option[PartitionVertex] = {
     val localId = this.vertexIdMap.get(globalId)
     val vertex = localId.flatMap { vId => Option(this.subGraph.getVertex(vId)) }
-    if(vertex.isDefined) { Some(PartitionVertex(vertex.get, globalId, this)) } else { None }
+    vertex.map { v=> PartitionVertex(v, globalId, this) }
   }
 
   /** Takes a global vertex id - looks it up locally, and then retrieves and returns the associated External vertex
@@ -340,7 +376,7 @@ class Partition private (private[this] val subGraph: Graph,
   protected def getExternalVertex(globalId: Identifier): Option[PartitionVertex] = {
     val localId = this.extVertexIdMap.get(globalId)
     val vertex = localId.flatMap { vId => Option(this.subGraph.getVertex(vId)) }
-    if(vertex.isDefined) { Some(PartitionVertex(vertex.get, globalId, this)) } else { None }
+    vertex.map { v => PartitionVertex(v, globalId, this) }
   }
 
   /**
@@ -395,12 +431,14 @@ class Partition private (private[this] val subGraph: Graph,
     */
   def removeVertex(vertex: PartitionVertex): Unit = {
     if(this.vertexIdMap.get(vertex.getId).isEmpty) { throw ExceptionFactory.vertexWithIdDoesNotExist(vertex.getId) }
+    vertex.getPartitionEdges(Direction.BOTH) foreach { e => this.edgeIdMap.remove(e.getId) }
     this.vertexIdMap.remove(vertex.getId)
     this.subGraph.removeVertex(PartitionVertex.unwrap(vertex))
   }
 
   protected def removeExternalVertex(vertex: PartitionVertex): Unit = {
     if(this.extVertexIdMap.get(vertex.getId).isEmpty) { throw ExceptionFactory.vertexWithIdDoesNotExist(vertex.getId) }
+    vertex.getPartitionEdges(Direction.BOTH) foreach { e => this.edgeIdMap.remove(e.getId) }
     this.extVertexIdMap.remove(vertex.getId)
     this.subGraph.removeVertex(PartitionVertex.unwrap(vertex))
   }
@@ -409,8 +447,8 @@ class Partition private (private[this] val subGraph: Graph,
     *
     * @return
     */
-  def addVertex(): PartitionVertex = {
-    val globalId = this.getNextId
+  def addVertex(globalId: Long = getNextId): PartitionVertex = {
+    if(vertexIdMap.get(globalId).isDefined) { throw ExceptionFactory.vertexWithIdAlreadyExists(globalId) }
     val newVertex = this.subGraph.addVertex(null)
     vertexIdMap.put(globalId, newVertex.getId)
     PartitionVertex(newVertex, globalId, this)
@@ -436,8 +474,8 @@ class Partition private (private[this] val subGraph: Graph,
    */
   def getEdge(globalId: Identifier): Option[PartitionEdge] = {
     val localId = this.edgeIdMap.get(globalId)
-    val edge = localId.map(this.subGraph.getEdge(_))
-    if(edge.isDefined) { Some(PartitionEdge(edge.get, globalId, this)) } else { None }
+    val edge = localId.flatMap { e => Option(this.subGraph.getEdge(e)) }
+    edge.map { e => PartitionEdge(e, globalId, this) }
   }
 
   /**
@@ -468,7 +506,12 @@ class Partition private (private[this] val subGraph: Graph,
     * @param external
     * @return
     */
-  def addEdge(out: PartitionVertex, in: PartitionVertex, label: String, external: Option[(PartitionVertex, Int)] = None): PartitionEdge = {
+  def addEdge(out: PartitionVertex,
+              in: PartitionVertex,
+              label: String,
+              external: Option[(PartitionVertex, Int)] = None,
+              globalId: Identifier = getNextId): PartitionEdge = {
+    if(this.edgeIdMap.get(globalId).isDefined) { throw ExceptionFactory.edgeWithIdAlreadyExist(globalId) }
     val e = external match {
       case Some((v,i)) =>
         val newVertex = this.subGraph.addVertex(null)
@@ -488,12 +531,11 @@ class Partition private (private[this] val subGraph: Graph,
       case None =>
         this.subGraph.addEdge(null, PartitionVertex.unwrap(out), PartitionVertex.unwrap(in), label)
     }
-    val globalId = this.getNextId
     edgeIdMap(globalId) = e.getId
     PartitionEdge(e, globalId, this)
   }
 
-  def getNextId: Long = { parent.getNextElementId }
+  def getNextId = parent.getNextElementId
 
   def canEqual(other: Any): Boolean = other.isInstanceOf[Partition]
 
@@ -504,5 +546,5 @@ class Partition private (private[this] val subGraph: Graph,
     case _ => false
   }
 
-  override def hashCode(): Int = this.id.hashCode
+  override def hashCode = this.id.hashCode
 }

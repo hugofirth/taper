@@ -18,12 +18,13 @@
 package org.gdget.experimental.graph.util.io
 
 
-import com.tinkerpop.blueprints.Graph
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph}
+import com.typesafe.scalalogging.slf4j.LazyLogging
 
 /** Description of Class
   *
   * @author hugofirth
   */
-trait GraphWriter {
-  def write(graph: Graph, path: String): Unit
+trait GraphWriter extends LazyLogging {
+  def write(graph: BlueprintsGraph, path: String): Unit
 }

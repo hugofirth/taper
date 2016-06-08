@@ -19,12 +19,13 @@ package org.gdget.experimental
 
 import java.io.BufferedInputStream
 
-import com.tinkerpop.blueprints.{Graph, Direction, Edge}
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph, Direction, Edge}
 import com.tinkerpop.blueprints.impls.tg.TinkerGraph
 import com.tinkerpop.gremlin.scala._
 import com.tinkerpop.blueprints.util.io.graphml.GraphMLReader
 import org.gdget.experimental.graph.TraversalPatternSummary
-import org.gdget.experimental.graph.partition.{METISPartitionStrategy, Partition, PartitionedGraph, HashPartitionStrategy}
+import org.gdget.experimental.graph.big.BigGraph
+import org.gdget.experimental.graph.partition.{METISPartitionStrategy, PartitionedGraph, HashPartitionStrategy}
 import org.gdget.util.{FileUtils, Countable}
 
 /** Description of Class
@@ -41,9 +42,9 @@ object GratefulDeadExperiment extends Experiment {
   summary.trie addBinding(Seq("song", "artist"), "Q1")
   summary.trie addBinding(Seq("artist", "song", "song", "artist"), "Q2")
 
-  def q1(start: Long)(implicit graph: Graph) = graph.v(start).startPipe.out("written_by").map { _("name") }.toSet()
+  def q1(start: Long)(implicit graph: BlueprintsGraph) = graph.v(start).startPipe.out("written_by").map { _("name") }.toSet()
 
-  def q2(implicit graph: Graph) = graph.V.has("type", "artist").in("written_by").outE("followed_by").dedup.order({
+  def q2(implicit graph: BlueprintsGraph) = graph.V.has("type", "artist").in("written_by").outE("followed_by").dedup.order({
     (left: Edge, right: Edge) =>
       val weight = right.getProperty[Int]("weight").compareTo(left.getProperty[Int]("weight"))
       if(weight == 0) {
@@ -61,16 +62,19 @@ object GratefulDeadExperiment extends Experiment {
   }
 
   private def runTAPR(): Unit = {
-    val strategy = HashPartitionStrategy(Map("vertex.labelKey" -> "type", "output.directory" -> "gratefulRefined"))
+    val strategy = HashPartitionStrategy(
+      { location: String => BigGraph(validKeys = Set("__globalId", "__label", "__external")) },
+      Map("vertex.labelKey" -> "type", "output.directory" -> "gratefulRefined")
+    )
     implicit val partitionedGdGraph: PartitionedGraph with Countable = PartitionedGraph(originalGdGraph, strategy, 3, summary)
     var base = partitionedGdGraph.getCount
-    for(j <- 0 until 10) { q1(j) }
+    //for(j <- 0 until 10) { q1(j) }
     val refinedQ1Count = partitionedGdGraph.getCount-base
     println("Graph refined 0 times. Q1 traversals given 10 executions :" + refinedQ1Count)
 
     base = partitionedGdGraph.getCount
 
-    for(k <- 0 until 10) { q2 }
+    //for(k <- 0 until 10) { q2 }
     val refinedQ2Count = partitionedGdGraph.getCount-base
     println("Graph refined 0 times. Q2 traversals given 10 executions :" + refinedQ2Count)
 
@@ -102,7 +106,10 @@ object GratefulDeadExperiment extends Experiment {
 
   private def runMETIS(): Unit = {
     val plan = this.getClass.getResourceAsStream("/plan-example.metis.part.3")
-    val strategy = METISPartitionStrategy(Map("vertex.labelKey" -> "type", "output.directory" -> "gratefulMetis"), plan)
+    val strategy = METISPartitionStrategy(
+      { location: String => BigGraph(validKeys = Set("__globalId", "__label", "__external"))},
+      Map("vertex.labelKey" -> "type", "output.directory" -> "gratefulMetis"), plan
+    )
     implicit val partitionedGdGraph: PartitionedGraph with Countable = PartitionedGraph(originalGdGraph, strategy, 3, summary)
     var base = partitionedGdGraph.getCount
     for(j <- 0 until 10) { q1(j) }

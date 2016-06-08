@@ -15,25 +15,29 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental
+package org.gdget.experimental.graph
 
-import com.typesafe.scalalogging.slf4j.LazyLogging
+import com.tinkerpop.blueprints.{Vertex, Edge, Element, Graph => BlueprintsGraph}
 
 /** Description of Class
   *
   * @author hugofirth
   */
-trait Experiment extends LazyLogging {
+trait PropertyRestrictedGraph extends Graph {
 
-  //Make trait implement Runnable, then have final execute method return Future and tick over until done, returning
-  //Runtime info (like memory etc...) every 10 seconds. Also time it.
+  def validKeys: Set[String]
 
-  def run(output: String): Unit
+  override protected def edgeFactory: (Any, Vertex, Vertex, EdgeLabel) => BlueprintsGraph => Edge with PropertyRestrictedElement
 
-  protected final def time[A](f: => A)= {
-    val s = System.nanoTime
-    ((System.nanoTime-s)/1e6, f)
-  }
+  override protected def vertexFactory: (Any) => BlueprintsGraph => Vertex with PropertyRestrictedElement
+}
 
+trait PropertyRestrictedElement extends Element {
 
+  protected var properties = Map.empty[String, Any]
+
+  protected def graph: PropertyRestrictedGraph
+
+  override def setProperty(key: String, value: Any) =
+    if(graph.validKeys contains key) properties = properties + ((key, value))
 }

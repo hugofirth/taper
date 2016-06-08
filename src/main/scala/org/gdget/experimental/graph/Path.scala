@@ -24,7 +24,7 @@ import org.gdget.experimental.graph.util.Labellable
   * @author hugofirth
   */
 class Path private (path: Seq[Labellable]) {
-  def toLabels: Seq[String] = path.map(_.getLabel)
+  def toLabels: Seq[VertexLabel] = path.map(_.getLabel)
 }
 
 object Path {

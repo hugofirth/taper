@@ -19,7 +19,7 @@ package org.gdget.experimental.graph.util.io
 
 import java.io.{FileNotFoundException, FileInputStream}
 
-import com.tinkerpop.blueprints.Graph
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph}
 
 import scala.util.Try
 
@@ -28,7 +28,7 @@ import scala.util.Try
   * @author hugofirth
   */
 case object RDFGraphReader extends GraphReader{
-  override def read(graph: Graph, path: String): Graph = {
+  override def read(graph: BlueprintsGraph, path: String): BlueprintsGraph = {
     val input = Try(Option(new FileInputStream(path))) recover {
       case e: FileNotFoundException =>
         Console.err.println("[ERROR]: Specified file path ("+path+") does not exist and could not be read.")

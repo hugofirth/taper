@@ -47,7 +47,11 @@ sealed trait External extends PartitionVertex {
     this.partition.parent.getVertex(this.getId).getVertices(direction, labels: _*)
   }
 
-  def logTraversal() = this.partition.parent match {
+  private[partition] def getLocalVertices = verticesView(Direction.BOTH)
+  
+  private[partition] def getLocalEdges = edgesView(Direction.BOTH)
+
+  private def logTraversal() = this.partition.parent match {
     case graph : Countable => graph.count()
     case _ =>
   }
@@ -77,15 +81,12 @@ class PartitionVertex private (val wrapped: Vertex, val globalId: Identifier, va
   wrapped.setProperty("__globalId", globalId.toLong)
 
   override def getEdges(direction: Direction, labels: String*): JIterable[Edge] = {
-    val edgesView: Iterable[Edge]= wrapped.getEdges(direction, labels: _*).asScala.view.map { e =>
-      PartitionEdge(e, e.getProperty[Any]("__globalId"), partition)
-    }
-    edgesView.asJava
+    val edges: Iterable[Edge] = edgesView(direction, labels: _*)
+    edges.asJava
   }
 
-  private[partition] def getPartitionEdges(direction: Direction, labels: String*): Iterable[PartitionEdge] = {
-    getEdges(direction, labels:_*).asScala.map( _.asInstanceOf[PartitionEdge] )
-  }
+  private[partition] def getPartitionEdges(direction: Direction, labels: String*): Iterable[PartitionEdge] = 
+    edgesView(direction, labels: _*)
 
   override def addEdge(label: String, other: Vertex): PartitionEdge = {
     val newEdge = wrapped.addEdge(label, other)
@@ -93,20 +94,26 @@ class PartitionVertex private (val wrapped: Vertex, val globalId: Identifier, va
     newEdge.setProperty("__globalId", globalId)
     PartitionEdge(newEdge, globalId, partition)
   }
+  
+  protected def edgesView(direction: Direction, labels: String*): Iterable[PartitionEdge] = 
+    wrapped.getEdges(direction, labels: _*).asScala.view.map { e => 
+      PartitionEdge(e, e.getProperty[Any]("__globalId"), partition) 
+    }
 
   override def query(): VertexQuery = new DefaultVertexQuery(this)
 
-  private def verticesView(direction: Direction, labels: String*): Iterable[PartitionVertex] =
-    wrapped.getVertices(direction, labels: _*).asScala.view.map { v => PartitionVertex(v, v.getProperty[Any]("__globalId"), partition) }
+  protected def verticesView(direction: Direction, labels: String*): Iterable[PartitionVertex] =
+    wrapped.getVertices(direction, labels: _*).asScala.view.map { v => 
+      PartitionVertex(v, v.getProperty[Any]("__globalId"), partition) 
+    }
 
   override def getVertices(direction: Direction, labels: String*): JIterable[Vertex] = {
     val vertices: Iterable[Vertex] = verticesView(direction, labels: _*)
     vertices.asJava
   }
 
-  def partitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] = {
-    getVertices(direction, labels:_*).asScala.map( _.asInstanceOf[PartitionVertex] )
-  }
+  def getPartitionVertices(direction: Direction, labels: String*): Iterable[PartitionVertex] =
+    verticesView(direction, labels: _*)
 
   private[partition] def intVertices(direction: Direction, labels: String*): Iterable[Internal] = {
     verticesView(direction, labels:_*).collect { case i: Internal => i }
@@ -137,7 +144,7 @@ class PartitionVertex private (val wrapped: Vertex, val globalId: Identifier, va
     case _ => false
   }
 
-  override def hashCode(): Int = this.getId.hashCode()
+  override def hashCode = this.getId.hashCode
 
-  override def toString: String = "v[g:"+this.getId+",l:"+this.wrapped.getId+"]"
+  override def toString = s"v[$getLabel, gId:$getId, lId:${wrapped.getId}, {$getPropertyKeys}]"
 }

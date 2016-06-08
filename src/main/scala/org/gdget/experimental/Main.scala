@@ -17,6 +17,10 @@
   */
 package org.gdget.experimental
 
+import com.tinkerpop.blueprints.impls.neo4j2.Neo4j2Graph
+import org.gdget.experimental.graph.util.io.METISGraphWriter
+import scala.collection.JavaConverters._
+
 
 /** Description of Class
   *
@@ -24,6 +28,23 @@ package org.gdget.experimental
   */
 object Main extends App {
 
-  //GratefulDeadExperiment.run("")
-  ProvGenExperiment.run("")
+  // GratefulDeadExperiment.run("")
+  // ProvGenExperiment1.run("")
+  ProvGenExperiment2.run("")
+  // MusicBrainzExperiment.run("")
+
+//  val config = Map(
+//    "neostore.nodestore.db.mapped_memory" -> "1000M",
+//    "neostore.relationshipstore.db.mapped_memory" -> "2500M",
+//    "neostore.relationshipgroupstore.db.mapped_memory" -> "10M",
+//    "neostore.propertystore.db.mapped_memory" -> "4500M",
+//    "neostore.propertystore.db.strings.mapped_memory" -> "800M",
+//    "neostore.propertystore.db.arrays.mapped_memory" -> "5M"
+//  )
+//
+//  val graph = new Neo4j2Graph("/Users/hugofirth/Desktop/Data/musicbrainz/graph.db", config.asJava)
+//  METISGraphWriter.write(graph, "/Users/hugofirth/Desktop/Data/musicbrainz/musicbrainz.metis")
+
+
+
 }

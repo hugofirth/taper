@@ -49,10 +49,11 @@ class PartitionedTinkerGraphSpec extends UnitSpec with DatabaseSpec {
   addDatabase(originalGdGraph, originalGraph)
 
   before {
-    partitionedGraph = PartitionedGraph(originalGraph, HashPartitionStrategy(Map("output.directory" -> "ptgs_tinker")), 2,
-      TraversalPatternSummary(Map.empty[String, Int], 4))
-    partitionedGdGraph = PartitionedGraph(originalGdGraph, HashPartitionStrategy(Map("output.directory" -> "ptgs_grateful")), 3,
-      TraversalPatternSummary(Map.empty[String, Int], 4))
+    partitionedGraph = PartitionedGraph(originalGraph, HashPartitionStrategy({ location: String => new TinkerGraph(location) },
+      Map("output.directory" -> "ptgs_tinker")), 2, TraversalPatternSummary(Map.empty[String, Int], 4))
+    partitionedGdGraph = PartitionedGraph(originalGdGraph,
+      HashPartitionStrategy({ location: String => new TinkerGraph(location) },
+      Map("output.directory" -> "ptgs_grateful")), 3, TraversalPatternSummary(Map.empty[String, Int], 4))
   }
 
   after {
@@ -181,13 +182,17 @@ class PartitionedNeoGraphSpec extends UnitSpec with DatabaseSpec {
 
   val originalNeoGraph = new Neo4j2Graph("target/neo/pngs_tinker")
   GraphMigrator.migrateGraph(originalGraph, originalNeoGraph)
+  originalNeoGraph.commit()
   val originalNeoGdGraph = new Neo4j2Graph("target/neo/pngs_grateful")
   GraphMigrator.migrateGraph(originalGdGraph, originalNeoGdGraph)
+  originalNeoGdGraph.commit()
 
   var partitionedGraph: PartitionedGraph with Countable =
-    PartitionedGraph(originalNeoGraph, HashPartitionStrategy(Map("output.directory" -> "pngs_tinker")), 2, TraversalPatternSummary(Map.empty[String, Int], 4))
+    PartitionedGraph(originalNeoGraph, HashPartitionStrategy({ location: String => new TinkerGraph(location) },
+      Map("output.directory" -> "pngs_tinker")), 2, TraversalPatternSummary(Map.empty[String, Int], 4))
   var partitionedGdGraph: PartitionedGraph with Countable =
-    PartitionedGraph(originalNeoGdGraph, HashPartitionStrategy(Map("output.directory" -> "pngs_grateful")), 3, TraversalPatternSummary(Map.empty[String, Int], 4))
+    PartitionedGraph(originalNeoGdGraph, HashPartitionStrategy({ location: String => new TinkerGraph(location) },
+      Map("output.directory" -> "pngs_grateful")), 3, TraversalPatternSummary(Map.empty[String, Int], 4))
 
   addDatabase(originalGraph, originalGdGraph, originalNeoGraph, originalNeoGdGraph, partitionedGraph, partitionedGdGraph)
   shouldClear("target/neo", "target/pngs_tinker", "target/pngs_grateful")

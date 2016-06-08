@@ -17,7 +17,7 @@
   */
 package org.gdget.experimental.graph
 
-import com.tinkerpop.blueprints.Graph
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph}
 import org.gdget.util.FileUtils
 import org.scalatest.{Suite, BeforeAndAfterAll}
 
@@ -28,9 +28,9 @@ import org.scalatest.{Suite, BeforeAndAfterAll}
   */
 trait DatabaseSpec extends BeforeAndAfterAll { this: Suite =>
 
-  private var databases: List[Graph] = List()
+  private var databases: List[BlueprintsGraph] = List()
   private var clear: List[String] = List()
-  def addDatabase(g: Graph*): Unit = databases ++= g
+  def addDatabase(g: BlueprintsGraph*): Unit = databases ++= g
   def shouldClear(dir: String*): Unit = clear ++= dir
 
   override def afterAll(): Unit = {

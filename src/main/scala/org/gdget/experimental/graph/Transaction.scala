@@ -15,25 +15,32 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental
+package org.gdget.experimental.graph
 
-import com.typesafe.scalalogging.slf4j.LazyLogging
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph, TransactionalGraph}
 
 /** Description of Class
   *
   * @author hugofirth
   */
-trait Experiment extends LazyLogging {
+sealed trait Transaction {
+  def commit(): Unit
+  def rollback(): Unit
+}
 
-  //Make trait implement Runnable, then have final execute method return Future and tick over until done, returning
-  //Runtime info (like memory etc...) every 10 seconds. Also time it.
+case class GenericTransaction(txG: TransactionalGraph) extends Transaction {
+  override def commit(): Unit = txG.commit()
 
-  def run(output: String): Unit
+  override def rollback(): Unit = txG.rollback()
+}
 
-  protected final def time[A](f: => A)= {
-    val s = System.nanoTime
-    ((System.nanoTime-s)/1e6, f)
+object Transaction {
+
+  def forGraph(graph: BlueprintsGraph): Option[Transaction] = graph match {
+    case g: TransactionalGraph => Some(GenericTransaction(g))
+    case g: BlueprintsGraph => None
   }
 
+  def supportedByGraph(graph: BlueprintsGraph): Boolean = graph.isInstanceOf[TransactionalGraph]
 
 }

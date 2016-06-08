@@ -63,7 +63,7 @@ class MutableTrieMapSpec extends UnitSpec {
                                                    (Vector('c','d','a'), 4)))
   }
 
-  it should "be able to return the value associated with a given prefix" in { trie get "abd" map( _ should be (0) ) }
+  it should "be able to return the value associated with a given prefix" in { trie get "abd" foreach( _ should be (0) ) }
 
 }
 

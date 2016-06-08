@@ -54,12 +54,12 @@ class PartitionSpec extends UnitSpec with DatabaseSpec {
     6 -> originalGraph.addVertex(6L)
   )
 
-  vertices get 1 map( _.setProperty("__label", "a") )
-  vertices get 2 map( _.setProperty("__label", "b") )
-  vertices get 3 map( _.setProperty("__label", "c") )
-  vertices get 4 map( _.setProperty("__label", "d") )
-  vertices get 5 map( _.setProperty("__label", "c") )
-  vertices get 6 map( _.setProperty("__label", "a") )
+  vertices get 1 foreach( _.setProperty("__label", "a") )
+  vertices get 2 foreach( _.setProperty("__label", "b") )
+  vertices get 3 foreach( _.setProperty("__label", "c") )
+  vertices get 4 foreach( _.setProperty("__label", "d") )
+  vertices get 5 foreach( _.setProperty("__label", "c") )
+  vertices get 6 foreach( _.setProperty("__label", "a") )
 
   originalGraph.addEdge(1L, vertices(1), vertices(2), "foo")
   originalGraph.addEdge(2L, vertices(1), vertices(4), "bar")
@@ -77,7 +77,8 @@ class PartitionSpec extends UnitSpec with DatabaseSpec {
   before {
     graph = new TinkerGraph()
     GraphHelper.copyGraph(originalGraph, graph)
-    partitionedGraph = PartitionedGraph(graph, HashPartitionStrategy(Map("output.directory" -> "ps_tinker")), 2, summary)
+    partitionedGraph = PartitionedGraph(graph, HashPartitionStrategy({ location: String => new TinkerGraph(location) },
+      Map("output.directory" -> "ps_tinker")), 2, summary)
     partition = partitionedGraph.getPartitions.headOption.getOrElse( fail("No partitions found") )
   }
 

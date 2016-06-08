@@ -17,23 +17,14 @@
   */
 package org.gdget.experimental
 
-import com.typesafe.scalalogging.slf4j.LazyLogging
-
 /** Description of Class
   *
   * @author hugofirth
   */
-trait Experiment extends LazyLogging {
+package object graph {
 
-  //Make trait implement Runnable, then have final execute method return Future and tick over until done, returning
-  //Runtime info (like memory etc...) every 10 seconds. Also time it.
-
-  def run(output: String): Unit
-
-  protected final def time[A](f: => A)= {
-    val s = System.nanoTime
-    ((System.nanoTime-s)/1e6, f)
-  }
-
+  type VertexLabel = String
+  type EdgeLabel = String
+  type Query = String
 
 }

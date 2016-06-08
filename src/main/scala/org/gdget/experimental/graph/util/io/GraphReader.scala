@@ -17,12 +17,12 @@
   */
 package org.gdget.experimental.graph.util.io
 
-import com.tinkerpop.blueprints.Graph
+import com.tinkerpop.blueprints.{Graph => BlueprintsGraph}
 
 /** Description of Class
   *
   * @author hugofirth
   */
 trait GraphReader {
-  def read(graph: Graph, path: String): Graph
+  def read(graph: BlueprintsGraph, path: String): BlueprintsGraph
 }

@@ -1,7 +1,6 @@
 # use glob syntax.
 syntax: glob
 *.ser
-*.class
 *~
 *.bak
 #*.off
@@ -42,14 +41,12 @@ release.properties
 #  syntax: regexp
 #  ^\.pc/
 
-#SHITTY output not in target directory
-build.log
-
 # Logs and databases #
 ######################
 *.log
 *.sql
 *.sqlite
+*.db
 
 # OS generated files #
 ######################

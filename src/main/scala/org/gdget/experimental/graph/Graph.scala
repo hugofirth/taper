@@ -15,25 +15,18 @@
   * See the License for the specific language governing permissions and
   * limitations under the License.
   */
-package org.gdget.experimental
+package org.gdget.experimental.graph
 
-import com.typesafe.scalalogging.slf4j.LazyLogging
+import com.tinkerpop.blueprints.{Vertex, Edge, Graph => BlueprintsGraph}
 
 /** Description of Class
   *
   * @author hugofirth
   */
-trait Experiment extends LazyLogging {
+trait Graph extends BlueprintsGraph {
 
-  //Make trait implement Runnable, then have final execute method return Future and tick over until done, returning
-  //Runtime info (like memory etc...) every 10 seconds. Also time it.
+  protected def edgeFactory: (Any, Vertex, Vertex, EdgeLabel) => BlueprintsGraph => Edge
 
-  def run(output: String): Unit
-
-  protected final def time[A](f: => A)= {
-    val s = System.nanoTime
-    ((System.nanoTime-s)/1e6, f)
-  }
-
+  protected def vertexFactory: (Any) => BlueprintsGraph => Vertex
 
 }
