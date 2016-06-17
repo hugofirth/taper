@@ -1,4 +1,4 @@
-##Readme for TAPER prototype
+##Readme for TAPER, part of org.gdget.experimental
 
 ####Anatomy of the project
 
