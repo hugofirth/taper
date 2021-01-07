@@ -1,14 +1,14 @@
-##Readme for TAPER, part of org.gdget.experimental
+## Readme for TAPER, part of org.gdget.experimental
 
-####Anatomy of the project
-
-Todo...
-
-####Building the project
+#### Anatomy of the project
 
 Todo...
 
-####Data processing
+#### Building the project
+
+Todo...
+
+#### Data processing
 
 Todo...
 
